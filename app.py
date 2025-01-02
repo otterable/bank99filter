@@ -56,6 +56,32 @@ def allowed_file(filename):
     logger.debug(f"Checking file extension for: {filename}")
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def build_transaction_key(trx):
+    """
+    Return a dict that uniquely identifies a transaction
+    by (Buchungsdatum, Buchungstext, Betrag).
+    You can expand this if needed (e.g. Umsatztext, Name des Partners).
+    """
+    return {
+        'Buchungsdatum': trx.get('Buchungsdatum', ''),
+        'Buchungstext':  trx.get('Buchungstext', ''),
+        'Betrag':        trx.get('Betrag', 0.0)
+    }
+
+def find_trx_index_by_key(key_dict):
+    """
+    Look for a transaction in 'transactions' that matches
+    (Buchungsdatum, Buchungstext, Betrag) from 'key_dict'.
+    Return that transaction's index, or -1 if not found.
+    """
+    for i, trx in enumerate(transactions):
+        # Compare date, text, amount (within a tolerance for floating)
+        if (trx.get('Buchungsdatum','') == key_dict.get('Buchungsdatum','') and
+            trx.get('Buchungstext','')  == key_dict.get('Buchungstext','')  and
+            abs(trx.get('Betrag', 0.0) - key_dict.get('Betrag', 0.0)) < 1e-9):
+            return i
+    return -1
+
 def parse_csv_and_store(file_stream):
     logger.debug("Parsing CSV file stream...")
     raw_data = file_stream.read()
@@ -158,11 +184,6 @@ def get_trx_amounts_for_category(cat_id):
 
     Return tuple: (total_overall, refundable, after_refund,
                    total_excluding_lists, total_list_items)
-
-    Where:
-      total_overall = total_excluding_lists + total_list_items
-      total_excluding_lists = sum of negative amounts for cat_id that are NOT in a list
-      total_list_items = sum of negative amounts for cat_id that ARE in a list
     """
     total_overall = 0.0
     total_excluding_lists = 0.0
@@ -413,11 +434,9 @@ def view_category_transactions(cat_id):
         category=cat_obj,
         transactions_data=data,
         sort_mode=sort_mode,
-        # Return normal summary
         total=total_overall,
         refundable=refundable_sum,
         after_refund=after_refund,
-        # Additional: excluding list items
         total_excluding_lists=total_excluding_lists,
         total_list_items=total_list_items,
         categories=categories,
@@ -578,6 +597,16 @@ def view_group_transactions(group_id):
     return render_template('group_transactions.html', group=g, results=results)
 
 # ---------------- LISTS -----------------
+
+@app.route('/lists')
+def manage_lists():
+    """
+    This route is needed so that url_for('manage_lists') works. 
+    'lists.html' is a dedicated page for managing lists, 
+    or you can unify it with categories, but here's a minimal example.
+    """
+    return render_template('lists.html', lists_data=lists_data, transactions=transactions)
+
 @app.route('/lists/create', methods=['POST'])
 def create_list():
     global next_list_id
@@ -593,7 +622,7 @@ def create_list():
         'color': color,
         'refund_list': is_refund,
         'transaction_ids': [],
-        'list_as_cat': list_as_cat  # NEW attribute if you want
+        'list_as_cat': list_as_cat
     }
     lists_data.append(new_list)
     next_list_id += 1
@@ -682,13 +711,38 @@ def view_list_transactions(list_id):
                            items=items,
                            total=total_amt)
 
-# ------------------ Import / Export ------------------
+# ------------------ Import / Export with transaction keys ------------------
+
 @app.route('/categories/export', methods=['GET'])
 def export_categories():
+    """
+    Export categories, groups, and lists_data, 
+    but lists_data uses 'transaction_keys' instead of raw indices.
+    """
+    # build a new structure for lists that replaces 'transaction_ids' with 'transaction_keys'
+    def lists_to_json():
+        result = []
+        for lobj in lists_data:
+            keys_arr = []
+            for idx in lobj['transaction_ids']:
+                if 0 <= idx < len(transactions):
+                    trx = transactions[idx]
+                    # build a unique key for this transaction
+                    keys_arr.append(build_transaction_key(trx))
+            result.append({
+                'id': lobj['id'],
+                'name': lobj['name'],
+                'color': lobj['color'],
+                'refund_list': lobj['refund_list'],
+                'list_as_cat': lobj.get('list_as_cat', False),
+                'transaction_keys': keys_arr  # store by keys, not indices
+            })
+        return result
+
     data = {
         "categories": categories,
         "groups": groups,
-        "lists_data": lists_data
+        "lists_data": lists_to_json()
     }
     resp = make_response(json.dumps(data, indent=2))
     resp.headers['Content-Type'] = 'application/json'
@@ -697,6 +751,11 @@ def export_categories():
 
 @app.route('/categories/import', methods=['POST'])
 def import_categories():
+    """
+    Import categories, groups, lists_data from JSON.
+    We'll restore lists' transaction memberships by matching transaction keys
+    to find the correct transaction index in 'transactions'.
+    """
     if 'categories_json' not in request.files:
         flash("No JSON file in request", "danger")
         return redirect(url_for('manage_categories'))
@@ -712,9 +771,35 @@ def import_categories():
         global categories, groups, lists_data
         global next_category_id, next_group_id, next_list_id
 
+        # load categories, groups as normal
         categories = data.get("categories", [])
         groups = data.get("groups", [])
-        lists_data = data.get("lists_data", [])
+
+        # the new lists data structure
+        lists_in = data.get("lists_data", [])
+
+        # build new lists_data with real transaction_ids
+        new_lists = []
+        for lst_obj in lists_in:
+            # gather transaction_keys
+            tk_arr = lst_obj.get('transaction_keys', [])
+            real_ids = []
+            for tkey in tk_arr:
+                i = find_trx_index_by_key(tkey)
+                if i >= 0:
+                    real_ids.append(i)
+                # else skip if not found
+            new_list = {
+                'id': lst_obj['id'],
+                'name': lst_obj['name'],
+                'color': lst_obj['color'],
+                'refund_list': lst_obj.get('refund_list', False),
+                'transaction_ids': real_ids,
+                'list_as_cat': lst_obj.get('list_as_cat', False)
+            }
+            new_lists.append(new_list)
+
+        lists_data = new_lists
 
         # Recompute next IDs
         if categories:
@@ -735,13 +820,13 @@ def import_categories():
         else:
             next_list_id = 1
 
-        # fix references
+        # fix references for existing transactions' DetectedCategoryId if invalid
         for trx in transactions:
             cid = trx.get('DetectedCategoryId')
             if not any(c['id'] == cid for c in categories):
                 trx['DetectedCategoryId'] = None
 
-        flash("Imported categories, groups, lists from JSON.", "success")
+        flash("Imported categories, groups, lists from JSON (with transaction_keys).", "success")
     except Exception as e:
         logger.error(f"Error importing JSON: {e}")
         flash(f"Error importing JSON: {e}", "danger")
@@ -764,13 +849,7 @@ def stats():
         cat_sums[c['id']] = 0.0
         cat_counts[c['id']] = 0
 
-    # Also handle lists that want to be "ListAsCat"
-    # (If you wish to treat them as categories in the stats.)
-    # E.g.:
-    # for l in lists_data:
-    #     if l.get('list_as_cat'):
-    #         cat_sums[l['id'] * -1] = 0.0   # negative ID to avoid collision
-    #         cat_counts[l['id'] * -1] = 0
+    # For lists that want to act as categories, you could also do a separate pass.
 
     # Accumulate negative amounts
     for idx, trx in enumerate(transactions):
@@ -780,12 +859,6 @@ def stats():
             cat_counts.setdefault(cid,0)
             cat_sums[cid] += trx['Betrag']
             cat_counts[cid] += 1
-
-            # If you want to treat a transaction as going to the "list-as-cat" if it is in a list:
-            # for l in lists_data:
-            #     if l.get('list_as_cat') and (idx in l['transaction_ids']):
-            #         cat_sums[-l['id']] += trx['Betrag']
-            #         cat_counts[-l['id']] += 1
 
     data_list = []
     for c in categories:
@@ -1117,17 +1190,14 @@ def view_unassigned_transactions():
     data = []
     for idx, trx in enumerate(transactions):
         if trx.get('DetectedCategoryId') is None:
-            # "UNK"
             cat_name = "UNK"
             cat_color = "#dddddd"
             data.append((trx, cat_name, cat_color, idx))
 
-    # Just compute totals for all unassigned
+    # compute totals for unassigned
     total = 0.0
     refundable = 0.0
     for idx, tup in enumerate(data):
-        # tup = (trx, cat_name, cat_color, idx)
-        # but careful we have a collision in variable names
         real_trx = tup[0]
         real_idx = tup[3]
         if is_expense(real_trx):
@@ -1137,10 +1207,6 @@ def view_unassigned_transactions():
                 refundable += amt
     after_refund = total - refundable
 
-    # Reuse "transactions.html" style or a separate "unassigned_transactions" template
-    # We'll just reuse a new 'unassigned_transactions.html' that is same style as transactions,
-    # or in your request, you want the same layout from transactions. 
-    # We'll pass "data" in "transactions_data" for consistency.
     return render_template(
         'unassigned_transactions.html',
         transactions_data=data,
@@ -1151,6 +1217,111 @@ def view_unassigned_transactions():
         after_refund=after_refund
     )
 
+##################################
+# AJAX endpoint to add to a list #
+##################################
+@app.route('/ajax/add_trx_to_list', methods=['POST'])
+def ajax_add_trx_to_list():
+    """
+    Expects JSON like:
+    {
+      "trx_index": 5,
+      "list_id": 2
+    }
+    Returns JSON:
+    { "status": "ok", "message": "...", "added": true|false }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"status":"error","message":"No JSON data"}), 400
+    
+    trx_index = data.get("trx_index")
+    list_id = data.get("list_id")
+    if trx_index is None or list_id is None:
+        return jsonify({"status":"error","message":"Missing trx_index or list_id"}), 400
+    
+    if not (0 <= trx_index < len(transactions)):
+        return jsonify({"status":"error","message":"Invalid trx_index"}), 400
+    
+    lobj = get_list_by_id(list_id)
+    if not lobj:
+        return jsonify({"status":"error","message":"List not found"}), 404
+
+    if trx_index not in lobj['transaction_ids']:
+        lobj['transaction_ids'].append(trx_index)
+        logger.debug(f"Transaction {trx_index} added to list {lobj['name']}")
+        return jsonify({"status":"ok","message":f"Transaction {trx_index} added to list '{lobj['name']}'","added":True})
+    else:
+        return jsonify({"status":"ok","message":f"Transaction {trx_index} already in list '{lobj['name']}'","added":False})
+
+
+#####################################
+# AJAX endpoint to unassign category
+#####################################
+@app.route('/ajax/unassign_category', methods=['POST'])
+def ajax_unassign_category():
+    """
+    Expects JSON like:
+    {
+      "trx_index": 7
+    }
+    Sets the transaction's DetectedCategoryId = None
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"status":"error","message":"No JSON data provided"}), 400
+
+    trx_index = data.get("trx_index")
+    if trx_index is None:
+        return jsonify({"status":"error","message":"Missing 'trx_index'"}), 400
+
+    if not (0 <= trx_index < len(transactions)):
+        return jsonify({"status":"error","message":"Invalid transaction index"}), 400
+
+    # Unassign category
+    transactions[trx_index]['DetectedCategoryId'] = None
+    return jsonify({"status":"ok","message":f"Transaction {trx_index} unassigned from any category"}), 200
+
+
+##############################################
+# AJAX endpoint to remove a transaction from 
+# a particular list
+##############################################
+@app.route('/ajax/remove_trx_from_list', methods=['POST'])
+def ajax_remove_trx_from_list():
+    """
+    Expects JSON like:
+    {
+      "trx_index": 5,
+      "list_id": 2
+    }
+    Returns JSON:
+    { "status": "ok"|"error", "message": "...", "removed": true|false }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"status":"error","message":"No JSON data"}), 400
+
+    trx_index = data.get("trx_index")
+    list_id = data.get("list_id")
+    if trx_index is None or list_id is None:
+        return jsonify({"status":"error","message":"Missing trx_index or list_id"}), 400
+
+    if not (0 <= trx_index < len(transactions)):
+        return jsonify({"status":"error","message":"Invalid trx_index"}), 400
+
+    lobj = get_list_by_id(list_id)
+    if not lobj:
+        return jsonify({"status":"error","message":"List not found"}), 404
+
+    if trx_index in lobj['transaction_ids']:
+        lobj['transaction_ids'].remove(trx_index)
+        logger.debug(f"Transaction {trx_index} removed from list {lobj['name']}")
+        return jsonify({"status":"ok","message":f"Transaction {trx_index} removed from list '{lobj['name']}'","removed":True})
+    else:
+        return jsonify({"status":"ok","message":f"Transaction {trx_index} not in list '{lobj['name']}'","removed":False})
+
+     
 if __name__ == '__main__':
     logger.debug("Starting Flask app (debug=True) on port 4444.")
     app.run(debug=True, port=4444)
