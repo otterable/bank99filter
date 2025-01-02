@@ -1,4 +1,4 @@
-#app.py 
+# app.py
 
 import os
 import io
@@ -30,29 +30,28 @@ import pandas as pd
 import plotly.express as px
 import plotly.io as pio
 
-# ------------------ Setup Logging ------------------
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# ------------------ Flask Setup --------------------
 app = Flask(__name__)
 app.secret_key = 'SOME_LONG_SECRET_KEY'
 
 # ------------------ In-Memory Data -----------------
 ALLOWED_EXTENSIONS = {'csv'}
 
-transactions = []  # Each is { <CSV fields>, 'DetectedCategoryId': int or None }
+transactions = []  # Each: { <CSV fields>, 'DetectedCategoryId': int or None }
 categories = []    # { 'id', 'name', 'color', 'rules': [...], 'group_id': int|None, 'show_up_as_group': bool }
 groups = []        # { 'id', 'name', 'color' }
-lists_data = []    # { 'id', 'name', 'color', 'refund_list': bool, 'transaction_ids': [...] }
+lists_data = []    # { 'id', 'name', 'color', 'refund_list': bool, 'transaction_ids': [...], 'list_as_cat': bool? }
 
 next_category_id = 1
 next_group_id = 1
 next_list_id = 1
 
 # ---------------------------------------------------
-#                  Helper Functions
+#                    Helpers
 # ---------------------------------------------------
+
 def allowed_file(filename):
     logger.debug(f"Checking file extension for: {filename}")
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -84,6 +83,7 @@ def parse_csv_and_store(file_stream):
         for h_i, header in enumerate(headers):
             row_data[header] = row[h_i] if h_i < len(row) else ''
 
+        # Convert amount
         if 'Betrag' in row_data:
             val = row_data['Betrag'].replace('\t','').replace(',','.')
             try:
@@ -97,9 +97,6 @@ def parse_csv_and_store(file_stream):
         logger.debug(f"Stored transaction row {idx}: {row_data}")
 
 def classify_transaction(trx):
-    """
-    Return the ID of the first-matching category (by 'rules'), else None
-    """
     text = (
         (trx.get('Buchungstext','') + ' ' +
          trx.get('Umsatztext','') + ' ' +
@@ -132,7 +129,6 @@ def get_list_by_id(l_id):
     return None
 
 def is_expense(trx):
-    # Negative => expense
     amt = trx.get('Betrag', 0.0)
     return (amt < 0)
 
@@ -141,57 +137,76 @@ def compute_refund_status(trx_index):
     Return True if transaction index is in any list with 'refund_list'=True
     """
     for lst in lists_data:
-        if lst['refund_list'] and (trx_index in lst['transaction_ids']):
+        if lst.get('refund_list') and (trx_index in lst['transaction_ids']):
+            return True
+    return False
+
+def is_in_any_list(trx_index):
+    """
+    Returns True if the given transaction index is in any list (not just refund lists).
+    """
+    for lst in lists_data:
+        if trx_index in lst['transaction_ids']:
             return True
     return False
 
 def get_trx_amounts_for_category(cat_id):
     """
-    For a given category, sum the negative amounts (expense),
-    also track how much is 'refundable'.
+    Sums the negative amounts for a category, excluding any transaction that is in a list.
+    Also sums how much is in lists specifically for that category,
+    so we can show e.g. "Total excluding lists: X" and "List items: Y".
+
+    Return tuple: (total_overall, refundable, after_refund,
+                   total_excluding_lists, total_list_items)
+
+    Where:
+      total_overall = total_excluding_lists + total_list_items
+      total_excluding_lists = sum of negative amounts for cat_id that are NOT in a list
+      total_list_items = sum of negative amounts for cat_id that ARE in a list
     """
-    total = 0.0
-    refundable = 0.0
+    total_overall = 0.0
+    total_excluding_lists = 0.0
+    total_list_items = 0.0
+    refundable_sum = 0.0
+
     for idx, trx in enumerate(transactions):
-        if trx.get('DetectedCategoryId') == cat_id and is_expense(trx):
+        if is_expense(trx) and trx.get('DetectedCategoryId') == cat_id:
             amt = trx['Betrag']
-            total += amt
+            total_overall += amt
+
+            if is_in_any_list(idx):
+                total_list_items += amt
+            else:
+                total_excluding_lists += amt
+
             if compute_refund_status(idx):
-                refundable += amt
-    return (total, refundable, total - refundable)
+                refundable_sum += amt
+
+    after_refund = total_overall - refundable_sum
+    return (total_overall, refundable_sum, after_refund,
+            total_excluding_lists, total_list_items)
 
 def compute_global_expenses():
-    """
-    Return (total_expenses, refundable_part, after_refund)
-    counting only negative amounts.
-    """
     total = 0.0
     refundable = 0.0
     for idx, trx in enumerate(transactions):
         if is_expense(trx):
-            amt = trx.get('Betrag', 0.0)
+            amt = trx.get('Betrag',0.0)
             total += amt
             if compute_refund_status(idx):
                 refundable += amt
     return (total, refundable, total - refundable)
 
 def compute_global_income():
-    """
-    Return sum of all positive amounts.
-    """
     total_inc = 0.0
     for trx in transactions:
         if trx.get('Betrag',0.0) >= 0:
             total_inc += trx['Betrag']
     return total_inc
 
+# ------------------- AJAX Reassign Category Endpoint -------------------
 @app.route('/ajax/assign_category', methods=['POST'])
 def ajax_assign_category():
-    """
-    AJAX endpoint to reassign a single transaction to a new category.
-    Expects JSON input: { "trx_index": <int>, "cat_id": <int> }
-    Returns JSON: { "status": "ok"|"error", "message": "..." }
-    """
     data = request.get_json()
     if not data:
         return jsonify({"status":"error","message":"No JSON data provided"}), 400
@@ -206,16 +221,11 @@ def ajax_assign_category():
     if not (0 <= trx_index < len(transactions)):
         return jsonify({"status":"error","message":"Invalid transaction index"}), 400
 
-    # Update
     transactions[trx_index]['DetectedCategoryId'] = cat_id
-    
-    # Optionally re-run classification or do other checks...
-    # transactions[trx_index]['DetectedCategoryId'] = classify_transaction(transactions[trx_index])
-    
     return jsonify({"status":"ok","message":"Transaction category updated"}), 200
 
 # ---------------------------------------------------
-#                       Routes
+#                   ROUTES
 # ---------------------------------------------------
 
 @app.route('/')
@@ -226,7 +236,6 @@ def index():
 # ----------------- UPLOAD CSV -------------------
 @app.route('/upload', methods=['GET','POST'])
 def upload_files():
-    logger.debug("Serving upload page.")
     if request.method == 'POST':
         files = request.files.getlist('files[]')
         if not files:
@@ -234,7 +243,6 @@ def upload_files():
             return redirect(request.url)
         for file in files:
             if file.filename and allowed_file(file.filename):
-                logger.debug(f"Processing file: {file.filename}")
                 parse_csv_and_store(file)
                 flash(f"File {file.filename} uploaded & parsed.", "success")
             else:
@@ -245,7 +253,6 @@ def upload_files():
 # ----------------- TRANSACTIONS ------------------
 @app.route('/transactions')
 def view_transactions():
-    logger.debug("Serving the transactions page.")
     sort_mode = request.args.get('sort','lowest')
 
     data = []
@@ -277,22 +284,19 @@ def view_transactions():
 
     total_exp, ref_exp, after_exp = compute_global_expenses()
 
-    # ---------------- NEW: Pass lists_data below ----------------
     return render_template(
         'transactions.html',
         transactions_data=data,
         categories=categories,
-        lists_data=lists_data,        # <-- THIS IS THE FIX
+        lists_data=lists_data,  # fix: pass the lists
         sort_mode=sort_mode,
         total=total_exp,
         refundable=ref_exp,
         after_refund=after_exp
     )
 
-
 @app.route('/transactions/classify_all', methods=['POST'])
 def classify_all_transactions():
-    logger.debug("Re-classifying all transactions with current rules.")
     for trx in transactions:
         trx['DetectedCategoryId'] = classify_transaction(trx)
     flash("All transactions re-classified according to updated rules.", 'success')
@@ -300,7 +304,6 @@ def classify_all_transactions():
 
 @app.route('/transactions/assign/<int:trx_index>/<int:cat_id>', methods=['POST'])
 def assign_category(trx_index, cat_id):
-    logger.debug(f"Assigning category {cat_id} to transaction index {trx_index}.")
     if 0 <= trx_index < len(transactions):
         transactions[trx_index]['DetectedCategoryId'] = cat_id
     flash("Transaction category updated.", 'success')
@@ -309,7 +312,9 @@ def assign_category(trx_index, cat_id):
 # ----------------- CATEGORIES & GROUPS ------------------
 @app.route('/categories')
 def manage_categories():
-    logger.debug("Serving categories management page.")
+    """
+    Merged with the 'lists' logic at the bottom (like you wanted).
+    """
     group_map = {}
     for g in groups:
         group_map[g['id']] = {
@@ -331,18 +336,18 @@ def manage_categories():
         if trx.get('DetectedCategoryId') is None:
             uncategorized_count += 1
 
-    # IMPORTANT: pass groups=groups here
     return render_template(
         'categories.html',
         group_map=group_map,
         no_group_cats=no_group_cats,
         uncategorized_count=uncategorized_count,
-        groups=groups
+        groups=groups,
+        lists_data=lists_data,   # to show lists at the bottom
+        transactions=transactions
     )
 
 @app.route('/categories/create', methods=['POST'])
 def create_category():
-    logger.debug("Creating a new category via form.")
     global next_category_id
     name = request.form.get('category_name','Unnamed').strip()
     color = request.form.get('category_color','#ffffff').strip()
@@ -360,16 +365,8 @@ def create_category():
     flash(f"Category '{name}' created!", 'success')
     return redirect(url_for('manage_categories'))
 
-# The route that your code calls: "view_category_transactions"
 @app.route('/categories/view/<int:cat_id>')
 def view_category_transactions(cat_id):
-    """
-    Enhanced version that looks/behaves like transactions.html:
-    - Sorting by ?sort=lowest|highest|latest_date|oldest_date
-    - Summaries of total expenses, etc.
-    - Same table layout & "Assign" logic
-    """
-    logger.debug(f"Viewing category transactions: cat_id={cat_id}")
     cat_obj = get_category_by_id(cat_id)
     if not cat_obj:
         flash("Category not found", "danger")
@@ -377,7 +374,6 @@ def view_category_transactions(cat_id):
 
     sort_mode = request.args.get('sort','lowest')
 
-    # Gather matching transactions with same data structure as transactions.html
     data = []
     for idx, trx in enumerate(transactions):
         if trx.get('DetectedCategoryId') == cat_id:
@@ -385,7 +381,7 @@ def view_category_transactions(cat_id):
             cat_color = cat_obj['color'] if cat_obj else "#dddddd"
             data.append((trx, cat_name, cat_color, idx))
 
-    # Sorting logic
+    # Sorting
     if sort_mode == 'lowest':
         data.sort(key=lambda x: x[0].get('Betrag',0.0))
     elif sort_mode == 'highest':
@@ -406,17 +402,24 @@ def view_category_transactions(cat_id):
         data.sort(key=lambda x: parse_date(x[0].get('Buchungsdatum','')))
 
     # Compute totals for just this category
-    total, refundable, after_refund = get_trx_amounts_for_category(cat_id)
+    (total_overall,
+     refundable_sum,
+     after_refund,
+     total_excluding_lists,
+     total_list_items) = get_trx_amounts_for_category(cat_id)
 
     return render_template(
         'category_transactions.html',
         category=cat_obj,
-        transactions_data=data,  # rename for clarity
+        transactions_data=data,
         sort_mode=sort_mode,
-        total=total,
-        refundable=refundable,
+        # Return normal summary
+        total=total_overall,
+        refundable=refundable_sum,
         after_refund=after_refund,
-        # Also pass the list of categories for possible reassign
+        # Additional: excluding list items
+        total_excluding_lists=total_excluding_lists,
+        total_list_items=total_list_items,
         categories=categories,
         lists_data=lists_data
     )
@@ -438,7 +441,7 @@ def ajax_toggle_show_group():
     cat = get_category_by_id(cat_id)
     if cat:
         cat['show_up_as_group'] = not cat['show_up_as_group']
-        return jsonify({"status":"ok","message":f"Category '{cat['name']}' => show_as_group={cat['show_up_as_group']}"})
+        return jsonify({"status":"ok","message":f"Category '{cat['name']}' => show_as_group={cat['show_up_as_group']}"} )
     return jsonify({"status":"error","message":"Category not found"})
 
 @app.route('/ajax/category/update_color', methods=['POST'])
@@ -543,6 +546,7 @@ def ajax_delete_group():
     group_id = int(request.form.get('group_id','0'))
     global groups
     groups = [gg for gg in groups if gg['id'] != group_id]
+    # reset group_id for categories
     for c in categories:
         if c.get('group_id') == group_id:
             c['group_id'] = None
@@ -574,27 +578,27 @@ def view_group_transactions(group_id):
     return render_template('group_transactions.html', group=g, results=results)
 
 # ---------------- LISTS -----------------
-@app.route('/lists')
-def manage_lists():
-    return render_template('lists.html', lists_data=lists_data, transactions=transactions)
-
 @app.route('/lists/create', methods=['POST'])
 def create_list():
     global next_list_id
     name = request.form.get('list_name','Untitled List').strip()
     color = request.form.get('list_color','#0000ff')
     is_refund = bool(request.form.get('refund_list',''))
+    # Optional: parse "list_as_cat" if you want to treat the list as a "category" in stats
+    list_as_cat = bool(request.form.get('list_as_cat',''))
+
     new_list = {
         'id': next_list_id,
         'name': name,
         'color': color,
         'refund_list': is_refund,
-        'transaction_ids': []
+        'transaction_ids': [],
+        'list_as_cat': list_as_cat  # NEW attribute if you want
     }
     lists_data.append(new_list)
     next_list_id += 1
     flash(f"List '{name}' created.", "success")
-    return redirect(url_for('manage_lists'))
+    return redirect(url_for('manage_categories'))
 
 @app.route('/lists/add_transaction', methods=['POST'])
 def add_trx_to_list():
@@ -603,7 +607,7 @@ def add_trx_to_list():
     lobj = get_list_by_id(list_id)
     if not lobj:
         flash("List not found", "danger")
-        return redirect(url_for('manage_lists'))
+        return redirect(url_for('manage_categories'))
 
     if 0 <= trx_index < len(transactions):
         if trx_index not in lobj['transaction_ids']:
@@ -614,7 +618,7 @@ def add_trx_to_list():
     else:
         flash("Invalid transaction index.", "danger")
 
-    return redirect(url_for('manage_lists'))
+    return redirect(url_for('manage_categories'))
 
 @app.route('/lists/remove_transaction', methods=['POST'])
 def remove_trx_from_list():
@@ -623,7 +627,7 @@ def remove_trx_from_list():
     lobj = get_list_by_id(list_id)
     if not lobj:
         flash("List not found", "danger")
-        return redirect(url_for('manage_lists'))
+        return redirect(url_for('manage_categories'))
 
     if trx_index in lobj['transaction_ids']:
         lobj['transaction_ids'].remove(trx_index)
@@ -631,7 +635,7 @@ def remove_trx_from_list():
     else:
         flash(f"Transaction {trx_index} not in list '{lobj['name']}'", "warning")
 
-    return redirect(url_for('manage_lists'))
+    return redirect(url_for('manage_categories'))
 
 @app.route('/lists/rename/<int:list_id>', methods=['POST'])
 def rename_list(list_id):
@@ -640,7 +644,7 @@ def rename_list(list_id):
     if lobj:
         lobj['name'] = new_name
         flash(f"List renamed to '{new_name}'", "success")
-    return redirect(url_for('manage_lists'))
+    return redirect(url_for('manage_categories'))
 
 @app.route('/lists/toggle_refund/<int:list_id>', methods=['POST'])
 def toggle_refund_list(list_id):
@@ -648,21 +652,21 @@ def toggle_refund_list(list_id):
     if lobj:
         lobj['refund_list'] = not lobj['refund_list']
         flash(f"List '{lobj['name']}' refund toggled -> {lobj['refund_list']}", "success")
-    return redirect(url_for('manage_lists'))
+    return redirect(url_for('manage_categories'))
 
 @app.route('/lists/delete/<int:list_id>', methods=['POST'])
 def delete_list(list_id):
     global lists_data
     lists_data = [l for l in lists_data if l['id'] != list_id]
     flash("List deleted", "success")
-    return redirect(url_for('manage_lists'))
+    return redirect(url_for('manage_categories'))
 
 @app.route('/lists/view/<int:list_id>')
 def view_list_transactions(list_id):
     lobj = get_list_by_id(list_id)
     if not lobj:
         flash("List not found", "danger")
-        return redirect(url_for('manage_lists'))
+        return redirect(url_for('manage_categories'))
     items = []
     total_amt = 0.0
     for idx in lobj['transaction_ids']:
@@ -734,7 +738,6 @@ def import_categories():
         # fix references
         for trx in transactions:
             cid = trx.get('DetectedCategoryId')
-            # If no longer valid => None
             if not any(c['id'] == cid for c in categories):
                 trx['DetectedCategoryId'] = None
 
@@ -761,6 +764,15 @@ def stats():
         cat_sums[c['id']] = 0.0
         cat_counts[c['id']] = 0
 
+    # Also handle lists that want to be "ListAsCat"
+    # (If you wish to treat them as categories in the stats.)
+    # E.g.:
+    # for l in lists_data:
+    #     if l.get('list_as_cat'):
+    #         cat_sums[l['id'] * -1] = 0.0   # negative ID to avoid collision
+    #         cat_counts[l['id'] * -1] = 0
+
+    # Accumulate negative amounts
     for idx, trx in enumerate(transactions):
         if is_expense(trx):
             cid = trx.get('DetectedCategoryId')
@@ -768,6 +780,12 @@ def stats():
             cat_counts.setdefault(cid,0)
             cat_sums[cid] += trx['Betrag']
             cat_counts[cid] += 1
+
+            # If you want to treat a transaction as going to the "list-as-cat" if it is in a list:
+            # for l in lists_data:
+            #     if l.get('list_as_cat') and (idx in l['transaction_ids']):
+            #         cat_sums[-l['id']] += trx['Betrag']
+            #         cat_counts[-l['id']] += 1
 
     data_list = []
     for c in categories:
@@ -799,6 +817,7 @@ def stats():
     elif sort_mode == 'least_transactions':
         data_list.sort(key=lambda x: x['count'])
 
+    # Summaries for groups
     group_sums = {}
     group_counts = {}
     for g in groups:
@@ -875,11 +894,10 @@ def bar_chart_png():
     for c in categories:
         cat_sums[c['id']] = 0.0
 
-    # Accumulate negative amounts per category
     for trx in transactions:
         if is_expense(trx):
             cid = trx.get('DetectedCategoryId')
-            cat_sums.setdefault(cid, 0.0)
+            cat_sums.setdefault(cid,0.0)
             cat_sums[cid] += trx['Betrag']
 
     cat_names = []
@@ -890,13 +908,11 @@ def bar_chart_png():
         sums.append(cat_sums[c['id']])
         colors.append(c['color'])
 
-    # If there are unassigned expenses
     if cat_sums[None] != 0.0:
         cat_names.append("UNK")
         sums.append(cat_sums[None])
         colors.append("#dddddd")
 
-    # If all sums are zero, create a dummy set so we have something to plot
     if len(cat_names) == 0:
         cat_names = ["No data"]
         sums = [0]
@@ -918,7 +934,6 @@ def bar_chart_png():
 
 @app.route('/stats/group_bar_chart.png')
 def group_bar_chart_png():
-    # Sum up negative amounts by category
     cat_sums = {}
     for c in categories:
         cat_sums[c['id']] = 0.0
@@ -929,26 +944,20 @@ def group_bar_chart_png():
             cat_sums.setdefault(cid, 0.0)
             cat_sums[cid] += trx['Betrag']
 
-    # Summarize by group
     group_sums = {}
-    color_map = {}
     for g in groups:
         group_sums[g['id']] = 0.0
-        color_map[g['id']] = g.get('color','#888888')
 
-    # Accumulate category amounts into their group
     for c in categories:
         g_id = c.get('group_id')
-        group_sums.setdefault(g_id, 0.0)
+        group_sums.setdefault(g_id,0.0)
         group_sums[g_id] += cat_sums[c['id']]
 
-    # Handle categories that "show_up_as_group"
     show_as_group = []
     for c in categories:
         if c.get('show_up_as_group'):
             show_as_group.append(("[CatAsGroup] "+c['name'], cat_sums[c['id']], c['color']))
 
-    # Build the data arrays
     group_names = []
     group_vals = []
     color_list = []
@@ -957,13 +966,11 @@ def group_bar_chart_png():
         group_vals.append(group_sums[g['id']])
         color_list.append(g['color'])
 
-    # Append the cat-as-group items
     for (lbl, val, col) in show_as_group:
         group_names.append(lbl)
         group_vals.append(val)
         color_list.append(col)
 
-    # If we end up with no data, put a dummy item
     if len(group_names) == 0:
         group_names = ["No data"]
         group_vals = [0]
@@ -983,15 +990,10 @@ def group_bar_chart_png():
     out.seek(0)
     return send_file(out, mimetype='image/png')
 
-
 # ---------------- Downloadable Chart Endpoints ----------------
 
 @app.route('/stats/download_bar_chart')
 def download_bar_chart():
-    """
-    Same logic as bar_chart_png, but served as a file download (attachment).
-    """
-    # Build the figure in memory
     cat_sums = {}
     cat_sums[None] = 0.0
     for c in categories:
@@ -1033,7 +1035,6 @@ def download_bar_chart():
     plt.close(fig)
     out.seek(0)
 
-    # Return as attachment
     return send_file(
         out,
         mimetype='image/png',
@@ -1043,9 +1044,6 @@ def download_bar_chart():
 
 @app.route('/stats/download_group_chart')
 def download_group_chart():
-    """
-    Same logic as group_bar_chart_png, but served as a file download (attachment).
-    """
     cat_sums = {}
     for c in categories:
         cat_sums[c['id']] = 0.0
@@ -1053,7 +1051,7 @@ def download_group_chart():
     for trx in transactions:
         if is_expense(trx):
             cid = trx.get('DetectedCategoryId')
-            cat_sums.setdefault(cid, 0.0)
+            cat_sums.setdefault(cid,0.0)
             cat_sums[cid] += trx['Betrag']
 
     group_sums = {}
@@ -1107,41 +1105,51 @@ def download_group_chart():
         as_attachment=True,
         download_name='group_chart.png'
     )
-    
+
+# ------------------ Unassigned (Same Layout as "transactions") ------------------
 @app.route('/categories/view/unassigned')
 def view_unassigned_transactions():
     """
-    Show all transactions that have no DetectedCategoryId (i.e. cat_id=None).
+    Show all transactions that have no DetectedCategoryId (cat_id=None),
+    but show them with the same layout (text, amount, date, assign dropdown).
     """
-    # Build a list of (index, transaction) for unassigned transactions
-    unassigned = []
+    # build data same as transactions.html
+    data = []
     for idx, trx in enumerate(transactions):
         if trx.get('DetectedCategoryId') is None:
-            unassigned.append((idx, trx))
+            # "UNK"
+            cat_name = "UNK"
+            cat_color = "#dddddd"
+            data.append((trx, cat_name, cat_color, idx))
 
-    # Optionally compute total amounts
+    # Just compute totals for all unassigned
     total = 0.0
     refundable = 0.0
-    for idx, trx in unassigned:
-        amt = trx.get('Betrag', 0.0)
-        if amt < 0:  # expense
+    for idx, tup in enumerate(data):
+        # tup = (trx, cat_name, cat_color, idx)
+        # but careful we have a collision in variable names
+        real_trx = tup[0]
+        real_idx = tup[3]
+        if is_expense(real_trx):
+            amt = real_trx.get('Betrag',0.0)
             total += amt
-            # If this transaction is in a "refund_list," include in refundable
-            if any(lst['refund_list'] and (idx in lst['transaction_ids']) for lst in lists_data):
+            if compute_refund_status(real_idx):
                 refundable += amt
-
     after_refund = total - refundable
 
+    # Reuse "transactions.html" style or a separate "unassigned_transactions" template
+    # We'll just reuse a new 'unassigned_transactions.html' that is same style as transactions,
+    # or in your request, you want the same layout from transactions. 
+    # We'll pass "data" in "transactions_data" for consistency.
     return render_template(
-        'unassigned_transactions.html', 
-        transactions=unassigned,
+        'unassigned_transactions.html',
+        transactions_data=data,
+        categories=categories,
+        lists_data=lists_data,
         total=total,
         refundable=refundable,
-        after_refund=after_refund,
-        lists_data=lists_data
+        after_refund=after_refund
     )
-
-
 
 if __name__ == '__main__':
     logger.debug("Starting Flask app (debug=True) on port 4444.")

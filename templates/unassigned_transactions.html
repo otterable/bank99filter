@@ -1,48 +1,151 @@
 <!-- templates/unassigned_transactions.html -->
 {% extends 'layout.html' %}
 {% block content %}
-  <h2>Unassigned Transactions</h2>
-  <a href="{{ url_for('stats') }}" class="btn btn-secondary mb-3">Back to Stats</a>
 
-  {% if transactions %}
-  <table class="table table-striped">
+<style>
+  .table.table-striped.table-bordered.align-middle {
+    table-layout: fixed;
+    width: 100%;
+    margin: 0;
+  }
+  .table thead th {
+    text-align: center !important;
+  }
+  .table.table-striped.table-bordered.align-middle th,
+  .table.table-striped.table-bordered.align-middle td {
+    padding: 0.5rem !important;
+    vertical-align: top;
+  }
+  .text-col {
+    width: 45%;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    margin: 0 !important;
+  }
+  .amount-col {
+    width: 20%;
+    text-align: center;
+    white-space: nowrap;
+    margin: 0 !important;
+    font-weight: bold;
+  }
+  .date-cat-assign-col {
+    width: 35%;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    margin: 0 !important;
+  }
+  .dropdown-menu {
+    max-width: 300px;
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+  .assign-btn {
+    margin: 0 !important;
+  }
+</style>
+
+<h2>Unassigned Transactions</h2>
+<p>
+  <strong>Total expenses:</strong> {{ "%.2f"|format(total) }} €<br>
+  <strong>Refundable expenses:</strong> {{ "%.2f"|format(refundable) }} €<br>
+  <strong>Total after refunds:</strong> {{ "%.2f"|format(after_refund) }} €
+</p>
+
+<div class="table-responsive">
+  <table class="table table-striped table-bordered align-middle">
     <thead>
       <tr>
-        <th>#</th>
-        <th>Buchungsdatum</th>
-        <th>Text</th>
-        <th>Betrag</th>
-        <th>Verwendungszweck</th>
-        <th>Name des Partners</th>
+        <th style="display:none;">#</th>
+        <th class="text-col">Text</th>
+        <th class="amount-col">€</th>
+        <th class="date-cat-assign-col">Data</th>
       </tr>
     </thead>
     <tbody>
-    {% for idx, trx in transactions %}
-      {% set is_refund = false %}
-      {% for lst in lists_data %}
-        {% if lst['refund_list'] and (idx in lst['transaction_ids']) %}
-          {% set is_refund = true %}
-        {% endif %}
-      {% endfor %}
-      <tr {% if is_refund %}style="text-decoration: line-through;"{% endif %}>
-        <td>{{ idx }}</td>
-        <td>{{ trx['Buchungsdatum'] }}</td>
-        <td>{{ trx['Buchungstext'] }} / {{ trx['Umsatztext'] }}</td>
-        <td>{{ "%.2f"|format(trx['Betrag']) }} €</td>
-        <td>{{ trx['Verwendungszweck'] }}</td>
-        <td>{{ trx['Name des Partners'] }}</td>
+      {% for trx, cat_name, cat_color, idx in transactions_data %}
+      <tr>
+        <td style="display:none;">{{ idx }}</td>
+        <td class="text-col">
+          <div>
+            {{ trx['Buchungstext'] }} / {{ trx['Umsatztext'] }}
+            <br>
+            <small>{{ trx['Name des Partners'] }}</small>
+          </div>
+        </td>
+        <td class="amount-col">{{ "%.2f"|format(trx['Betrag']) }}</td>
+        <td class="date-cat-assign-col">
+          <!-- Date -->
+          <div>
+            {% if trx['Buchungsdatum'] and '-' in trx['Buchungsdatum'] %}
+              {% set parts = trx['Buchungsdatum'].split('-') %}
+              {% if parts|length == 3 %}
+                {{ parts[2] }}.{{ parts[1] }}.{{ parts[0] }}
+              {% else %}
+                {{ trx['Buchungsdatum'] }}
+              {% endif %}
+            {% else %}
+              {{ trx['Buchungsdatum'] }}
+            {% endif %}
+          </div>
+          <!-- Category name (UNK) or color -->
+          <div style="background-color: {{ cat_color }}; display: inline-block;">
+            {{ cat_name }}
+          </div>
+          <!-- Assign dropdown -->
+          <div class="dropdown">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle assign-btn"
+                    type="button" data-bs-toggle="dropdown">
+              <span class="navbar-toggler-icon"></span>
+              Assign
+            </button>
+            <ul class="dropdown-menu p-2">
+              <!-- Categories -->
+              <li class="mb-2">
+                <strong>Category:</strong>
+                <div class="d-flex flex-wrap mt-1" style="gap: 4px;">
+                  {% for cat in categories %}
+                  <form action="{{ url_for('assign_category', trx_index=idx, cat_id=cat['id']) }}"
+                        method="POST" style="display:inline;">
+                    <button class="btn btn-sm btn-outline-dark"
+                            type="submit"
+                            style="color: {{ cat['color'] }};"
+                            title="Assign {{ cat['name'] }}">
+                      {{ cat['name'] }}
+                    </button>
+                  </form>
+                  {% endfor %}
+                </div>
+              </li>
+              <li><hr class="dropdown-divider"/></li>
+              <!-- Lists -->
+              <li>
+                <strong>List:</strong>
+                <div class="d-flex flex-wrap mt-1" style="gap: 4px;">
+                  {% for lst in lists_data %}
+                  <form action="{{ url_for('add_trx_to_list') }}"
+                        method="POST"
+                        style="display:inline;">
+                    <input type="hidden" name="trx_index" value="{{ idx }}">
+                    <input type="hidden" name="list_id" value="{{ lst['id'] }}">
+                    <button class="btn btn-sm btn-outline-dark"
+                            type="submit"
+                            title="Add to {{ lst['name'] }}">
+                      {{ lst['name'] }}
+                    </button>
+                  </form>
+                  {% endfor %}
+                </div>
+              </li>
+            </ul>
+          </div>
+        </td>
       </tr>
-    {% endfor %}
+      {% endfor %}
     </tbody>
   </table>
-  <div class="mt-3">
-    <p><strong>Total:</strong> {{ "%.2f"|format(total) }} €</p>
-    <p><strong>Refundable:</strong> {{ "%.2f"|format(refundable) }} €</p>
-    <p><strong>Total after refund:</strong> {{ "%.2f"|format(after_refund) }} €</p>
-  </div>
-  {% else %}
-  <div class="alert alert-info">
-    No transactions are unassigned.
-  </div>
-  {% endif %}
+</div>
+
+<a href="{{ url_for('stats') }}" class="btn btn-secondary mt-3">Back to Stats</a>
+
 {% endblock %}

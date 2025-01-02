@@ -11,14 +11,19 @@
 </div>
 
 <h2>Categories & Groups</h2>
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <div>
+
+<!-- Export JSON on one line, Import JSON on the next line -->
+<div class="mb-3">
+  <!-- Export JSON -->
+  <div class="mb-2">
     <a href="{{ url_for('export_categories') }}" class="btn btn-success">
       Export as JSON
     </a>
   </div>
+
+  <!-- Import JSON -->
   <div>
-    <form action="{{ url_for('import_categories') }}" method="POST" enctype="multipart/form-data" class="d-inline">
+    <form action="{{ url_for('import_categories') }}" method="POST" enctype="multipart/form-data">
       <label for="categories_json" class="form-label me-2">Import JSON:</label>
       <input type="file" id="categories_json" name="categories_json" accept=".json" required>
       <button type="submit" class="btn btn-secondary">Import</button>
@@ -33,13 +38,11 @@
     {% for cat in obj.categories %}
     <!-- Single category block -->
     <div class="border p-2 mb-2" id="catContainer{{ cat['id'] }}">
-      <!-- Top row: Category name/ID, color, "View Transactions" -->
       <div class="d-flex align-items-center justify-content-between">
         <div>
-          <!-- We add IDs to reflect real-time changes -->
           <strong id="catNameDisplay{{ cat['id'] }}">{{ cat['name'] }}</strong>
           (ID: {{ cat['id'] }})
-          <!-- color swatch ID: catColorSwatch -->
+          <!-- color swatch -->
           <span class="ms-2"
                 id="catColorSwatch{{ cat['id'] }}"
                 style="background-color: {{ cat['color'] }}; padding: 0 10px;">
@@ -47,112 +50,110 @@
           </span>
         </div>
         <div>
+          <!-- "View Transactions" button -->
           <a href="{{ url_for('view_category_transactions', cat_id=cat['id']) }}"
              class="btn btn-sm btn-info">
             View Transactions
           </a>
-        </div>
-      </div>
 
-      <!-- Category actions dropdown -->
-      <div class="dropdown d-inline-block mt-2">
-        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-                data-bs-toggle="dropdown">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <!-- 
-          We add p-3 and a min-width to give it more space.
-        -->
-        <ul class="dropdown-menu p-3" style="min-width: 280px;">
-          <!-- Rename -->
-          <li class="mb-3">
-            <label>Rename:</label>
-            <input type="text" class="form-control form-control-sm"
-                   id="catName{{ cat['id'] }}"
-                   value="{{ cat['name'] }}">
-            <button class="btn btn-sm btn-outline-success mt-1"
-                    onclick="ajaxRenameCat({{cat['id']}})">
-              Save
+          <!-- Hamburger for category actions -->
+          <div class="dropdown d-inline-block ms-1">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                    data-bs-toggle="dropdown">
+              <span class="navbar-toggler-icon"></span>
             </button>
-          </li>
-
-          <!-- Update color -->
-          <li class="mb-3">
-            <label>Update Color:</label>
-            <input type="color" class="form-control form-control-color"
-                   id="catColor{{ cat['id'] }}"
-                   value="{{ cat['color'] }}">
-            <button class="btn btn-sm btn-outline-primary mt-1"
-                    onclick="ajaxUpdateCatColor({{cat['id']}})">
-              Update
-            </button>
-          </li>
-
-          <!-- Toggle "Show as Group" -->
-          <li class="mb-3">
-            <label>Toggle Show-as-Group:</label>
-            <button class="btn btn-sm 
-              {% if cat.get('show_up_as_group') %}btn-warning{% else %}btn-outline-warning{% endif %}"
-              onclick="ajaxToggleShowGroup({{cat['id']}})">
-              {% if cat.get('show_up_as_group') %}
-                Disable
-              {% else %}
-                Enable
-              {% endif %}
-            </button>
-          </li>
-
-          <!-- Assign Group -->
-          <li class="mb-3">
-            <label>Assign Group:</label>
-            <select id="catGroup{{cat['id']}}" class="form-select form-select-sm">
-              <option value="">-- None --</option>
-              {% for g in groups %}
-              <option value="{{ g['id'] }}"
-                {% if cat['group_id'] == g['id'] %}selected{% endif %}>
-                {{ g['name'] }}
-              </option>
-              {% endfor %}
-            </select>
-            <button class="btn btn-sm btn-outline-secondary mt-1"
-                    onclick="ajaxAssignGroup({{cat['id']}})">
-              Set
-            </button>
-          </li>
-
-          <!-- Rules -->
-          <li class="mb-3">
-            <label>Rules:</label>
-            <div id="catRules{{ cat['id'] }}">
-              {% for rule in cat['rules'] %}
-              <span class="badge bg-info text-dark me-1 mb-1">
-                {{ rule }}
-                <button class="btn-close btn-close-white ms-1"
-                        style="float:right;"
-                        onclick="ajaxRemoveRule({{cat['id']}}, '{{rule}}')">
+            <ul class="dropdown-menu p-3" style="min-width: 280px;">
+              <!-- Rename -->
+              <li class="mb-3">
+                <label>Rename:</label>
+                <input type="text" class="form-control form-control-sm"
+                       id="catName{{ cat['id'] }}"
+                       value="{{ cat['name'] }}">
+                <button class="btn btn-sm btn-outline-success mt-1"
+                        onclick="ajaxRenameCat({{cat['id']}})">
+                  Save
                 </button>
-              </span>
-              {% endfor %}
-            </div>
-            <div class="input-group input-group-sm mt-1" style="max-width: 200px;">
-              <input type="text" id="ruleWord{{cat['id']}}" class="form-control" placeholder="Add rule...">
-              <button class="btn btn-secondary"
-                      onclick="ajaxAddRule({{cat['id']}})">
-                Add
-              </button>
-            </div>
-          </li>
+              </li>
 
-          <li><hr class="dropdown-divider"></li>
+              <!-- Update color -->
+              <li class="mb-3">
+                <label>Update Color:</label>
+                <input type="color" class="form-control form-control-color"
+                       id="catColor{{ cat['id'] }}"
+                       value="{{ cat['color'] }}">
+                <button class="btn btn-sm btn-outline-primary mt-1"
+                        onclick="ajaxUpdateCatColor({{cat['id']}})">
+                  Update
+                </button>
+              </li>
 
-          <!-- Delete category -->
-          <li>
-            <button class="btn btn-sm btn-danger"
-                    onclick="ajaxDeleteCategory({{cat['id']}})">
-              Delete Category
-            </button>
-          </li>
-        </ul>
+              <!-- Toggle "Show as Group" -->
+              <li class="mb-3">
+                <label>Toggle Show-as-Group:</label>
+                <button class="btn btn-sm 
+                  {% if cat.get('show_up_as_group') %}btn-warning{% else %}btn-outline-warning{% endif %}"
+                  onclick="ajaxToggleShowGroup({{cat['id']}})">
+                  {% if cat.get('show_up_as_group') %}
+                    Disable
+                  {% else %}
+                    Enable
+                  {% endif %}
+                </button>
+              </li>
+
+              <!-- Assign Group -->
+              <li class="mb-3">
+                <label>Assign Group:</label>
+                <select id="catGroup{{cat['id']}}" class="form-select form-select-sm">
+                  <option value="">-- None --</option>
+                  {% for g in groups %}
+                  <option value="{{ g['id'] }}"
+                    {% if cat['group_id'] == g['id'] %}selected{% endif %}>
+                    {{ g['name'] }}
+                  </option>
+                  {% endfor %}
+                </select>
+                <button class="btn btn-sm btn-outline-secondary mt-1"
+                        onclick="ajaxAssignGroup({{cat['id']}})">
+                  Set
+                </button>
+              </li>
+
+              <!-- Rules -->
+              <li class="mb-3">
+                <label>Rules:</label>
+                <div id="catRules{{ cat['id'] }}">
+                  {% for rule in cat['rules'] %}
+                  <span class="badge bg-info text-dark me-1 mb-1">
+                    {{ rule }}
+                    <button class="btn-close btn-close-white ms-1"
+                            style="float:right;"
+                            onclick="ajaxRemoveRule({{cat['id']}}, '{{rule}}')">
+                    </button>
+                  </span>
+                  {% endfor %}
+                </div>
+                <div class="input-group input-group-sm mt-1" style="max-width: 200px;">
+                  <input type="text" id="ruleWord{{cat['id']}}" class="form-control" placeholder="Add rule...">
+                  <button class="btn btn-secondary"
+                          onclick="ajaxAddRule({{cat['id']}})">
+                    Add
+                  </button>
+                </div>
+              </li>
+
+              <li><hr class="dropdown-divider"></li>
+
+              <!-- Delete category -->
+              <li>
+                <button class="btn btn-sm btn-danger"
+                        onclick="ajaxDeleteCategory({{cat['id']}})">
+                  Delete Category
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
     {% endfor %}
@@ -178,104 +179,105 @@
            class="btn btn-sm btn-info">
           View Transactions
         </a>
-      </div>
-    </div>
 
-    <div class="dropdown d-inline-block mt-2">
-      <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-              data-bs-toggle="dropdown">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <ul class="dropdown-menu p-3" style="min-width: 280px;">
-        <!-- Rename -->
-        <li class="mb-3">
-          <label>Rename:</label>
-          <input type="text" class="form-control form-control-sm"
-                 id="catName{{ cat['id'] }}"
-                 value="{{ cat['name'] }}">
-          <button class="btn btn-sm btn-outline-success mt-1"
-                  onclick="ajaxRenameCat({{cat['id']}})">
-            Save
+        <!-- Category actions hamburger -->
+        <div class="dropdown d-inline-block ms-1">
+          <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                  data-bs-toggle="dropdown">
+            <span class="navbar-toggler-icon"></span>
           </button>
-        </li>
-
-        <!-- Update color -->
-        <li class="mb-3">
-          <label>Update Color:</label>
-          <input type="color" class="form-control form-control-color"
-                 id="catColor{{ cat['id'] }}"
-                 value="{{ cat['color'] }}">
-          <button class="btn btn-sm btn-outline-primary mt-1"
-                  onclick="ajaxUpdateCatColor({{cat['id']}})">
-            Update
-          </button>
-        </li>
-
-        <!-- Toggle "Show as Group" -->
-        <li class="mb-3">
-          <label>Toggle Show-as-Group:</label>
-          <button class="btn btn-sm 
-            {% if cat.get('show_up_as_group') %}btn-warning{% else %}btn-outline-warning{% endif %}"
-            onclick="ajaxToggleShowGroup({{cat['id']}})">
-            {% if cat.get('show_up_as_group') %}
-              Disable
-            {% else %}
-              Enable
-            {% endif %}
-          </button>
-        </li>
-
-        <!-- Assign group -->
-        <li class="mb-3">
-          <label>Assign Group:</label>
-          <select id="catGroup{{cat['id']}}" class="form-select form-select-sm">
-            <option value="">-- None --</option>
-            {% for g in groups %}
-            <option value="{{ g['id'] }}"
-              {% if cat['group_id'] == g['id'] %}selected{% endif %}>
-              {{ g['name'] }}
-            </option>
-            {% endfor %}
-          </select>
-          <button class="btn btn-sm btn-outline-secondary mt-1"
-                  onclick="ajaxAssignGroup({{cat['id']}})">
-            Set
-          </button>
-        </li>
-
-        <!-- Rules -->
-        <li class="mb-3">
-          <label>Rules:</label>
-          <div id="catRules{{ cat['id'] }}">
-            {% for rule in cat['rules'] %}
-            <span class="badge bg-info text-dark me-1 mb-1">
-              {{ rule }}
-              <button class="btn-close btn-close-white ms-1"
-                      style="float:right;"
-                      onclick="ajaxRemoveRule({{cat['id']}}, '{{rule}}')">
+          <ul class="dropdown-menu p-3" style="min-width: 280px;">
+            <!-- Rename -->
+            <li class="mb-3">
+              <label>Rename:</label>
+              <input type="text" class="form-control form-control-sm"
+                     id="catName{{ cat['id'] }}"
+                     value="{{ cat['name'] }}">
+              <button class="btn btn-sm btn-outline-success mt-1"
+                      onclick="ajaxRenameCat({{cat['id']}})">
+                Save
               </button>
-            </span>
-            {% endfor %}
-          </div>
-          <div class="input-group input-group-sm mt-1" style="max-width: 200px;">
-            <input type="text" id="ruleWord{{cat['id']}}" class="form-control" placeholder="Add rule...">
-            <button class="btn btn-secondary"
-                    onclick="ajaxAddRule({{cat['id']}})">
-              Add
-            </button>
-          </div>
-        </li>
+            </li>
 
-        <li><hr class="dropdown-divider"></li>
+            <!-- Update color -->
+            <li class="mb-3">
+              <label>Update Color:</label>
+              <input type="color" class="form-control form-control-color"
+                     id="catColor{{ cat['id'] }}"
+                     value="{{ cat['color'] }}">
+              <button class="btn btn-sm btn-outline-primary mt-1"
+                      onclick="ajaxUpdateCatColor({{cat['id']}})">
+                Update
+              </button>
+            </li>
 
-        <!-- Delete category -->
-        <li>
-          <button class="btn btn-sm btn-danger"
-                  onclick="ajaxDeleteCategory({{cat['id']}})">
-            Delete Category
-          </button>
-        </li>
-      </ul>
+            <!-- Toggle "Show as Group" -->
+            <li class="mb-3">
+              <label>Toggle Show-as-Group:</label>
+              <button class="btn btn-sm 
+                {% if cat.get('show_up_as_group') %}btn-warning{% else %}btn-outline-warning{% endif %}"
+                onclick="ajaxToggleShowGroup({{cat['id']}})">
+                {% if cat.get('show_up_as_group') %}
+                  Disable
+                {% else %}
+                  Enable
+                {% endif %}
+              </button>
+            </li>
+
+            <!-- Assign group -->
+            <li class="mb-3">
+              <label>Assign Group:</label>
+              <select id="catGroup{{cat['id']}}" class="form-select form-select-sm">
+                <option value="">-- None --</option>
+                {% for g in groups %}
+                <option value="{{ g['id'] }}"
+                  {% if cat['group_id'] == g['id'] %}selected{% endif %}>
+                  {{ g['name'] }}
+                </option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-sm btn-outline-secondary mt-1"
+                      onclick="ajaxAssignGroup({{cat['id']}})">
+                Set
+              </button>
+            </li>
+
+            <!-- Rules -->
+            <li class="mb-3">
+              <label>Rules:</label>
+              <div id="catRules{{ cat['id'] }}">
+                {% for rule in cat['rules'] %}
+                <span class="badge bg-info text-dark me-1 mb-1">
+                  {{ rule }}
+                  <button class="btn-close btn-close-white ms-1"
+                          style="float:right;"
+                          onclick="ajaxRemoveRule({{cat['id']}}, '{{rule}}')">
+                  </button>
+                </span>
+                {% endfor %}
+              </div>
+              <div class="input-group input-group-sm mt-1" style="max-width: 200px;">
+                <input type="text" id="ruleWord{{cat['id']}}" class="form-control" placeholder="Add rule...">
+                <button class="btn btn-secondary"
+                        onclick="ajaxAddRule({{cat['id']}})">
+                  Add
+                </button>
+              </div>
+            </li>
+
+            <li><hr class="dropdown-divider"></li>
+
+            <!-- Delete category -->
+            <li>
+              <button class="btn btn-sm btn-danger"
+                      onclick="ajaxDeleteCategory({{cat['id']}})">
+                Delete Category
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
     </div>
   </div>
   {% endfor %}
@@ -283,8 +285,14 @@
 
 {% if uncategorized_count > 0 %}
   <h4 class="mt-4">(Uncategorized)</h4>
-  <div class="ms-3">
-    <p class="text-muted">Transactions with no category: {{ uncategorized_count }}</p>
+  <div class="ms-3 d-flex align-items-center">
+    <p class="text-muted mb-0 me-3">
+      Transactions with no category: {{ uncategorized_count }}
+    </p>
+    <!-- New "View Transactions" button -->
+    <a href="{{ url_for('view_unassigned_transactions') }}" class="btn btn-sm btn-warning">
+      View Transactions
+    </a>
   </div>
 {% endif %}
 
@@ -308,51 +316,55 @@
 <h2>Groups</h2>
 {% for g in groups %}
 <div class="border p-2 mb-2">
-  <h5 class="mb-1">
-    {{ g['name'] }} (Group ID: {{ g['id'] }})
-    <button class="btn btn-sm btn-danger float-end"
-            onclick="deleteGroup({{ g['id'] }})">
-      Delete
-    </button>
-  </h5>
+  <div class="d-flex align-items-center justify-content-between">
+    <div>
+      <strong>{{ g['name'] }}</strong> (Group ID: {{ g['id'] }})
+      <span class="ms-2" style="background-color: {{ g['color'] }}; padding:0 10px;">
+        {{ g['color'] }}
+      </span>
+    </div>
+    <div>
+      <a href="{{ url_for('view_group_transactions', group_id=g['id']) }}"
+         class="btn btn-sm btn-info">
+        View Transactions
+      </a>
 
-  <div class="dropdown d-inline-block mb-2">
-    <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button"
-            data-bs-toggle="dropdown">
-      <span class="navbar-toggler-icon"></span>
-    </button>
-    <ul class="dropdown-menu p-3" style="min-width: 240px;">
-      <li class="mb-3">
-        <label>Rename Group:</label>
-        <input type="text" class="form-control form-control-sm"
-               id="gName{{g['id']}}" value="{{ g['name'] }}">
-        <button class="btn btn-sm btn-outline-success mt-1"
-                onclick="ajaxRenameGroup({{g['id']}})">
-          Save
+      <!-- Hamburger for group actions -->
+      <div class="dropdown d-inline-block ms-1">
+        <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button"
+                data-bs-toggle="dropdown">
+          <span class="navbar-toggler-icon"></span>
         </button>
-      </li>
-      <li>
-        <label>Update Color:</label>
-        <input type="color" class="form-control form-control-color"
-               id="gColor{{g['id']}}" value="{{ g['color'] }}">
-        <button class="btn btn-sm btn-outline-primary mt-1"
-                onclick="ajaxUpdateGroupColor({{g['id']}})">
-          Update
-        </button>
-      </li>
-    </ul>
+        <ul class="dropdown-menu p-3" style="min-width: 240px;">
+          <li class="mb-3">
+            <label>Rename Group:</label>
+            <input type="text" class="form-control form-control-sm"
+                   id="gName{{g['id']}}" value="{{ g['name'] }}">
+            <button class="btn btn-sm btn-outline-success mt-1"
+                    onclick="ajaxRenameGroup({{g['id']}})">
+              Save
+            </button>
+          </li>
+          <li class="mb-3">
+            <label>Update Color:</label>
+            <input type="color" class="form-control form-control-color"
+                   id="gColor{{g['id']}}" value="{{ g['color'] }}">
+            <button class="btn btn-sm btn-outline-primary mt-1"
+                    onclick="ajaxUpdateGroupColor({{g['id']}})">
+              Update
+            </button>
+          </li>
+          <li><hr class="dropdown-divider"></li>
+          <li>
+            <button class="btn btn-sm btn-danger"
+                    onclick="deleteGroup({{ g['id'] }})">
+              Delete Group
+            </button>
+          </li>
+        </ul>
+      </div>
+    </div>
   </div>
-
-  <p class="mb-1">
-    Color:
-    <span style="background-color: {{ g['color'] }};">
-      {{ g['color'] }}
-    </span>
-  </p>
-  <a href="{{ url_for('view_group_transactions', group_id=g['id']) }}"
-     class="btn btn-sm btn-info">
-    View Transactions
-  </a>
 </div>
 {% endfor %}
 
@@ -371,10 +383,129 @@
   <button type="submit" class="btn btn-primary">Create Group</button>
 </form>
 
+<hr>
+<h2>Lists</h2>
+<!-- Show each list in the same "Title / ID / Color / Buttons / Dropdown" style -->
+
+{% for l in lists_data %}
+<div class="border p-2 mb-2" id="listContainer{{ l['id'] }}">
+  <div class="d-flex align-items-center justify-content-between">
+    <div>
+      <strong>{{ l['name'] }}</strong> (List ID: {{ l['id'] }})
+      <span class="ms-2" style="background-color: {{ l['color'] }}; padding:0 10px;">
+        {{ l['color'] }}
+      </span>
+      {% if l['refund_list'] %}
+        <span class="badge bg-warning ms-2">Refund</span>
+      {% endif %}
+    </div>
+    <div>
+      <!-- "View Items" button -->
+      <a href="{{ url_for('view_list_transactions', list_id=l['id']) }}"
+         class="btn btn-sm btn-info">
+        View Items
+      </a>
+
+      <!-- Hamburger dropdown for lists -->
+      <div class="dropdown d-inline-block ms-1">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <ul class="dropdown-menu p-3" style="min-width: 280px;">
+          <!-- Rename list -->
+          <li class="mb-3">
+            <label>Rename List:</label>
+            <form action="{{ url_for('rename_list', list_id=l['id']) }}" method="POST" class="mt-1">
+              <div class="input-group input-group-sm">
+                <input type="text" class="form-control" name="new_name" value="{{ l['name'] }}">
+                <button class="btn btn-outline-success btn-sm" type="submit">Save</button>
+              </div>
+            </form>
+          </li>
+
+          <!-- Toggle refund -->
+          <li class="mb-3">
+            <label>Toggle Refund:</label>
+            <form action="{{ url_for('toggle_refund_list', list_id=l['id']) }}" method="POST" class="mt-1">
+              <button class="btn btn-sm 
+                {% if l['refund_list'] %}btn-warning{% else %}btn-outline-warning{% endif %}"
+                type="submit">
+                {% if l['refund_list'] %} Disable Refund {% else %} Enable Refund {% endif %}
+              </button>
+            </form>
+          </li>
+
+          <!-- Delete list -->
+          <li>
+            <form action="{{ url_for('delete_list', list_id=l['id']) }}" method="POST">
+              <button class="btn btn-sm btn-danger mt-1" type="submit">
+                Delete List
+              </button>
+            </form>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<h3>Create New List</h3>
+<form action="{{ url_for('create_list') }}" method="POST">
+  <div class="mb-3">
+    <label for="list_name" class="form-label">List Name</label>
+    <input type="text" class="form-control" id="list_name" name="list_name" required>
+  </div>
+  <div class="mb-3">
+    <label for="list_color" class="form-label">Color</label>
+    <input type="color" class="form-control form-control-color" id="list_color" name="list_color" value="#0000ff">
+  </div>
+  <div class="mb-3 form-check">
+    <input class="form-check-input" type="checkbox" id="refund_list" name="refund_list" value="1">
+    <label class="form-check-label" for="refund_list">Refund List?</label>
+  </div>
+  <button class="btn btn-primary">Create List</button>
+</form>
+
+<hr>
+<!-- "Add transaction to a list" and "Remove transaction from a list" forms -->
+<h3>Add Transactions to a List</h3>
+<form action="{{ url_for('add_trx_to_list') }}" method="POST" class="row g-3 mb-4">
+  <div class="col-auto">
+    <select name="list_id" class="form-select">
+      {% for l in lists_data %}
+      <option value="{{ l['id'] }}">{{ l['name'] }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <input type="number" name="trx_index" placeholder="Transaction index" class="form-control" min="0">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-secondary">Add Transaction</button>
+  </div>
+</form>
+
+<h3>Remove Transactions from a List</h3>
+<form action="{{ url_for('remove_trx_from_list') }}" method="POST" class="row g-3">
+  <div class="col-auto">
+    <select name="list_id" class="form-select">
+      {% for l in lists_data %}
+      <option value="{{ l['id'] }}">{{ l['name'] }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <input type="number" name="trx_index" placeholder="Transaction index" class="form-control" min="0">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-secondary">Remove Transaction</button>
+  </div>
+</form>
+
 <!-- 
   JS Functions for Groups and Categories (with toasts)
-  Ensure that showToast() is called whenever an AJAX operation succeeds,
-  and we update the DOM in real time if possible.
+  (Your existing script)
 -->
 <script>
 let toastTimer = null;
@@ -403,7 +534,6 @@ function showToast(msg) {
 
 // ---------- GROUP AJAX -----------
 function deleteGroup(gid) {
-  console.log("[JS] deleteGroup", gid);
   if(!confirm("Delete group " + gid + "?")) return;
   fetch("{{ url_for('ajax_delete_group') }}", {
     method: "POST",
@@ -414,7 +544,6 @@ function deleteGroup(gid) {
   .then(resp => {
     if(resp.status=="ok") {
       showToast(resp.message);
-      // reload after short delay to remove the group from DOM fully.
       setTimeout(() => { location.reload(); }, 1000);
     } else {
       alert(resp.message);
@@ -422,7 +551,6 @@ function deleteGroup(gid) {
   });
 }
 function ajaxRenameGroup(gid) {
-  console.log("[JS] renameGroup", gid);
   let new_name = document.getElementById("gName"+gid).value;
   fetch("{{ url_for('ajax_rename_group') }}", {
     method: "POST",
@@ -433,9 +561,7 @@ function ajaxRenameGroup(gid) {
   .then(resp=>{
     if(resp.status=="ok"){
       showToast(resp.message);
-      // Update the text in real time if you want:
-      // find the group's heading <h5> or so. But we have no unique ID.
-      // For simplicity, just do reload if you want immediate correctness.
+      // you could reload to update group name in DOM
       // location.reload();
     } else {
       alert(resp.message);
@@ -443,7 +569,6 @@ function ajaxRenameGroup(gid) {
   });
 }
 function ajaxUpdateGroupColor(gid) {
-  console.log("[JS] updateGroupColor", gid);
   let new_color = document.getElementById("gColor"+gid).value;
   fetch("{{ url_for('ajax_update_group_color') }}", {
     method:"POST",
@@ -454,10 +579,6 @@ function ajaxUpdateGroupColor(gid) {
   .then(resp=>{
     if(resp.status=="ok"){
       showToast(resp.message);
-      // you might want to update the color <span> in real time:
-      // e.g. document.querySelector("#someGroupColorSpan"+gid).style.backgroundColor = new_color;
-      // or simply reload to reflect new color in the group block.
-      // location.reload();
     } else {
       alert(resp.message);
     }
@@ -466,7 +587,6 @@ function ajaxUpdateGroupColor(gid) {
 
 // ---------- CATEGORY AJAX -----------
 function ajaxRenameCat(catId) {
-  console.log("[JS] rename cat", catId);
   let new_name = document.getElementById('catName' + catId).value;
   fetch("{{ url_for('ajax_rename_category') }}", {
     method:"POST",
@@ -477,7 +597,6 @@ function ajaxRenameCat(catId) {
   .then(resp=>{
     if(resp.status=="ok"){
       showToast(resp.message);
-      // Reflect the new name in the DOM right away:
       document.getElementById('catNameDisplay' + catId).innerText = new_name;
     } else {
       alert(resp.message);
@@ -486,7 +605,6 @@ function ajaxRenameCat(catId) {
 }
 
 function ajaxUpdateCatColor(catId) {
-  console.log("[JS] update cat color", catId);
   let c = document.getElementById('catColor' + catId).value;
   fetch("{{ url_for('ajax_update_category_color') }}", {
     method:"POST",
@@ -497,7 +615,6 @@ function ajaxUpdateCatColor(catId) {
   .then(resp=>{
     if(resp.status=="ok"){
       showToast(resp.message);
-      // Immediately reflect new color swatch + text:
       const swatch = document.getElementById("catColorSwatch" + catId);
       if (swatch) {
         swatch.style.backgroundColor = c;
@@ -510,7 +627,6 @@ function ajaxUpdateCatColor(catId) {
 }
 
 function ajaxToggleShowGroup(catId) {
-  console.log("[JS] toggle show group for cat", catId);
   fetch("{{ url_for('ajax_toggle_show_group') }}", {
     method:"POST",
     headers: {"Content-Type":"application/x-www-form-urlencoded"},
@@ -520,8 +636,6 @@ function ajaxToggleShowGroup(catId) {
   .then(resp=>{
     if(resp.status=="ok"){
       showToast(resp.message);
-      // Possibly reflect the new "show_as_group" button style.
-      // For now, do nothing else in the DOM.
     } else {
       alert(resp.message);
     }
@@ -529,7 +643,6 @@ function ajaxToggleShowGroup(catId) {
 }
 
 function ajaxAssignGroup(catId) {
-  console.log("[JS] assign group for cat", catId);
   let g = document.getElementById('catGroup' + catId).value;
   fetch("{{ url_for('ajax_assign_group') }}", {
     method:"POST",
@@ -540,8 +653,6 @@ function ajaxAssignGroup(catId) {
   .then(resp=>{
     if(resp.status=="ok"){
       showToast(resp.message);
-      // Because changing group might mean we must move this category's DOM element
-      // to another group's container, let's just do a short reload:
       setTimeout(() => { location.reload(); }, 1000);
     } else {
       alert(resp.message);
@@ -550,31 +661,17 @@ function ajaxAssignGroup(catId) {
 }
 
 function ajaxAddRule(catId) {
-  console.log("[JS] add rule to cat", catId);
   let r = document.getElementById('ruleWord' + catId).value;
   fetch("{{ url_for('ajax_add_rule') }}", {
     method:"POST",
     headers: {"Content-Type":"application/x-www-form-urlencoded"},
     body:"cat_id="+catId+"&rule_word="+encodeURIComponent(r)
   })
-  .then(r=>r.json())
+  .then(x=>x.json())
   .then(resp=>{
     if(resp.status=="ok"){
       showToast(resp.message);
-      // Add the new rule badge immediately:
-      const rulesDiv = document.getElementById("catRules" + catId);
-      if (rulesDiv) {
-        // create a new <span class="badge bg-info text-dark me-1 mb-1"> ...
-        let span = document.createElement("span");
-        span.className = "badge bg-info text-dark me-1 mb-1";
-        span.innerHTML = `
-          ${r}
-          <button class="btn-close btn-close-white ms-1"
-                  style="float:right;"
-                  onclick="ajaxRemoveRule(${catId}, '${r}')"></button>
-        `;
-        rulesDiv.appendChild(span);
-      }
+      // Optionally update DOM with new rule...
     } else {
       alert(resp.message);
     }
@@ -582,29 +679,16 @@ function ajaxAddRule(catId) {
 }
 
 function ajaxRemoveRule(catId, rule) {
-  console.log("[JS] remove rule from cat", catId, rule);
   fetch("{{ url_for('ajax_remove_rule') }}", {
     method:"POST",
     headers: {"Content-Type":"application/x-www-form-urlencoded"},
     body:"cat_id="+catId+"&rule_word="+encodeURIComponent(rule)
   })
-  .then(r=>r.json())
+  .then(x=>x.json())
   .then(resp=>{
     if(resp.status=="ok"){
       showToast(resp.message);
-      // Remove that rule badge from DOM:
-      // Easiest approach: reload or do a small search for the span.
-      // We'll do a small search in the catRules container:
-      const rulesDiv = document.getElementById("catRules" + catId);
-      if (rulesDiv) {
-        // find a badge containing 'rule' text. We'll do a naive approach:
-        let badges = rulesDiv.querySelectorAll(".badge");
-        badges.forEach(badge => {
-          if (badge.innerText.trim().startsWith(rule)) {
-            badge.remove();
-          }
-        });
-      }
+      // remove rule badge from DOM if you want
     } else {
       alert(resp.message);
     }
@@ -612,7 +696,6 @@ function ajaxRemoveRule(catId, rule) {
 }
 
 function ajaxDeleteCategory(catId) {
-  console.log("[JS] delete cat", catId);
   if(!confirm("Delete category ID="+catId+"?")) return;
   fetch("{{ url_for('ajax_delete_category') }}", {
     method:"POST",
@@ -623,11 +706,9 @@ function ajaxDeleteCategory(catId) {
   .then(resp=>{
     if(resp.status=="ok"){
       showToast(resp.message);
-      // remove this cat's container from DOM
+      // remove container
       const container = document.getElementById("catContainer" + catId);
-      if (container) {
-        container.remove();
-      }
+      if(container) container.remove();
     } else {
       alert(resp.message);
     }
