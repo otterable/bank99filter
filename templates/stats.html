@@ -1,0 +1,169 @@
+{% extends 'layout.html' %}
+{% block content %}
+<style>
+  /* Center only the table headings */
+  table thead th {
+    text-align: center !important;
+  }
+  /* Make the "Total" column text centered and bold, but keep other columns left-aligned */
+  .amount-cell {
+    text-align: center;
+    font-weight: bold;
+  }
+</style>
+
+<h2>Expenses by Category</h2>
+
+<!-- Show global expense stats + total income. -->
+<p><strong>Total expenses (negative):</strong> {{ "%.2f"|format(total_exp) }}</p>
+<p><strong>Refundable expenses:</strong> {{ "%.2f"|format(ref_exp) }}</p>
+<p><strong>Total expenses after refunds:</strong> {{ "%.2f"|format(after_exp) }}</p>
+<p><strong>Total income (positive):</strong> {{ "%.2f"|format(total_inc) }}</p>
+
+<hr>
+<!-- Category chart (negative amounts only) -->
+<div class="mb-3">
+  <img src="{{ url_for('bar_chart_png') }}" alt="Category Chart" class="img-fluid mb-2">
+  <!-- Download link for Category Chart -->
+  <a href="{{ url_for('download_bar_chart') }}" class="btn btn-sm btn-outline-secondary">
+    Download Category Chart
+  </a>
+</div>
+
+<!-- "Sort by" form below the category chart -->
+<form method="GET" action="{{ url_for('stats') }}" class="mb-3">
+  <label>Sort by:</label>
+  <select name="sort" class="form-select d-inline-block" style="width:auto;">
+    <option value="highest" {% if sort_mode=='highest' %}selected{% endif %}>Highest Amount</option>
+    <option value="lowest" {% if sort_mode=='lowest' %}selected{% endif %}>Lowest Amount</option>
+    <option value="most_transactions" {% if sort_mode=='most_transactions' %}selected{% endif %}>Most Transactions</option>
+    <option value="least_transactions" {% if sort_mode=='least_transactions' %}selected{% endif %}>Least Transactions</option>
+  </select>
+  <button class="btn btn-sm btn-primary">Apply</button>
+</form>
+
+<!-- Category table -->
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>Cat</th>
+      <th>Total</th>
+      <th>Trx#</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for cat_stat in category_stats %}
+    <tr>
+      <!-- Background color on the "Cat" column -->
+      <td style="background-color: {{ cat_stat.color }};">
+        {{ cat_stat.name }}
+      </td>
+      <!-- Center + bold for total -->
+      <td class="amount-cell">
+        {{ "%.2f"|format(cat_stat.amount) }}
+      </td>
+      <td>
+        {{ cat_stat.count }}
+      </td>
+      <td>
+        {% if cat_stat.cat_id is none %}
+        <!-- Special button for unassigned category -->
+        <a href="{{ url_for('view_unassigned_transactions') }}" class="btn btn-sm btn-warning">
+          View Unassigned
+        </a>
+        {% else %}
+        <!-- Normal assigned category -->
+        <a href="{{ url_for('view_category_transactions', cat_id=cat_stat.cat_id) }}" class="btn btn-sm btn-info">
+          View Transactions
+        </a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<hr>
+<!-- Group chart (negative amounts only) -->
+<div class="mb-3">
+  <img src="{{ url_for('group_bar_chart_png') }}" alt="Group Chart" class="img-fluid mb-2">
+  <!-- Download link for Group Chart -->
+  <a href="{{ url_for('download_group_chart') }}" class="btn btn-sm btn-outline-secondary">
+    Download Group Chart
+  </a>
+</div>
+
+<!-- Group table -->
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>Cat</th>
+      <th>Total</th>
+      <th>Trx#</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for g in group_stats %}
+    <tr>
+      <!-- Background color on the "Cat" column -->
+      <td style="background-color: {{ g.color }};">
+        {{ g.name }}
+      </td>
+      <!-- Center + bold for total -->
+      <td class="amount-cell">
+        {{ "%.2f"|format(g.amount) }}
+      </td>
+      <td>
+        {{ g.count }}
+      </td>
+      <td>
+        {% if g.group_id > 0 %}
+        <a href="{{ url_for('view_group_transactions', group_id=g.group_id) }}" class="btn btn-sm btn-info">
+          View Transactions
+        </a>
+        {% else %}
+        <span class="text-muted">[CatAsGroup, no direct group]</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<hr>
+<h4>Lists</h4>
+{% if lists_data %}
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>List</th>
+      <th>Color</th>
+      <th>Refund?</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for l in lists_data %}
+    <tr>
+      <td>{{ l['name'] }}</td>
+      <td style="background-color: {{ l['color'] }};">{{ l['color'] }}</td>
+      <td>{{ 'Yes' if l['refund_list'] else 'No' }}</td>
+      <td>
+        <a href="{{ url_for('view_list_transactions', list_id=l['id']) }}" class="btn btn-sm btn-info">
+          View
+        </a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No lists yet.</p>
+{% endif %}
+
+<a href="{{ url_for('export_interactive_charts') }}" class="btn btn-secondary mt-3">
+  Export Interactive Charts (HTML)
+</a>
+{% endblock %}

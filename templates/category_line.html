@@ -1,0 +1,256 @@
+<!-- templates/category_line.html-->
+
+
+<div class="border p-2 mb-2">
+  <!-- Top row: Category name/ID, color swatch, and View Transactions button -->
+  <div class="d-flex align-items-center justify-content-between">
+    <div>
+      <strong>{{ cat['name'] }}</strong> 
+      (ID: {{ cat['id'] }})
+
+      <!-- Color swatch -->
+      <span class="ms-2" style="background-color: {{ cat['color'] }}; padding: 0 10px;">
+        {{ cat['color'] }}
+      </span>
+    </div>
+
+    <!-- "View Transactions" button on the right side -->
+    <div>
+      <a href="{{ url_for('view_category_transactions', cat_id=cat['id']) }}"
+         class="btn btn-sm btn-info">
+        View Transactions
+      </a>
+    </div>
+  </div>
+
+  <!-- Hamburger menu for category actions -->
+  <div class="dropdown d-inline-block mt-2">
+    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <ul class="dropdown-menu">
+      <!-- Rename -->
+      <li class="p-2">
+        <label>Rename:</label>
+        <input type="text" class="form-control form-control-sm" id="catName{{ cat['id'] }}" value="{{ cat['name'] }}">
+        <button class="btn btn-sm btn-outline-success mt-1"
+                onclick="ajaxRenameCat({{cat['id']}})">
+          Save
+        </button>
+      </li>
+
+      <!-- Update color -->
+      <li class="p-2">
+        <label>Update Color:</label>
+        <input type="color" class="form-control form-control-color"
+               id="catColor{{ cat['id'] }}"
+               value="{{ cat['color'] }}">
+        <button class="btn btn-sm btn-outline-primary mt-1"
+                onclick="ajaxUpdateCatColor({{cat['id']}})">
+          Update
+        </button>
+      </li>
+
+      <!-- Toggle "Show as Group" -->
+      <li class="p-2">
+        <label>Toggle Show-as-Group:</label>
+        <button class="btn btn-sm 
+          {% if cat.get('show_up_as_group') %}btn-warning{% else %}btn-outline-warning{% endif %}"
+          onclick="ajaxToggleShowGroup({{cat['id']}})">
+          {% if cat.get('show_up_as_group') %}
+            Disable
+          {% else %}
+            Enable
+          {% endif %}
+        </button>
+      </li>
+
+      <!-- Assign group -->
+      <li class="p-2">
+        <label>Assign Group:</label>
+        <select id="catGroup{{cat['id']}}" class="form-select form-select-sm">
+          <option value="">-- None --</option>
+          {% for g in groups %}
+          <option value="{{ g['id'] }}"
+            {% if cat['group_id'] == g['id'] %}selected{% endif %}>
+            {{ g['name'] }}
+          </option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-sm btn-outline-secondary mt-1"
+                onclick="ajaxAssignGroup({{cat['id']}})">
+          Set
+        </button>
+      </li>
+
+      <!-- Rules -->
+      <li class="p-2">
+        <label>Rules:</label>
+        <div>
+          {% for rule in cat['rules'] %}
+          <span class="badge bg-info text-dark me-1 mb-1">
+            {{ rule }}
+            <button class="btn-close btn-close-white ms-1"
+                    style="float:right;"
+                    onclick="ajaxRemoveRule({{cat['id']}}, '{{rule}}')">
+            </button>
+          </span>
+          {% endfor %}
+        </div>
+        <div class="input-group input-group-sm mt-1" style="max-width: 200px;">
+          <input type="text" id="ruleWord{{cat['id']}}" class="form-control" placeholder="Add rule...">
+          <button class="btn btn-secondary"
+                  onclick="ajaxAddRule({{cat['id']}})">
+            Add
+          </button>
+        </div>
+      </li>
+
+      <li><hr class="dropdown-divider"></li>
+
+      <!-- Delete category -->
+      <li class="p-2">
+        <button class="btn btn-sm btn-danger"
+                onclick="ajaxDeleteCategory({{cat['id']}})">
+          Delete Category
+        </button>
+      </li>
+    </ul>
+  </div>
+</div>
+
+<script>
+/* ---------- Category AJAX Functions ---------- */
+
+// Rename category
+function ajaxRenameCat(catId) {
+  console.log("[JS] rename cat", catId);
+  let new_name = document.getElementById('catName' + catId).value;
+  fetch("{{ url_for('ajax_rename_category') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "cat_id=" + catId + "&new_name=" + encodeURIComponent(new_name)
+  })
+  .then(r => r.json())
+  .then(resp => {
+    if (resp.status === "ok") {
+      showToast(resp.message);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+// Update category color
+function ajaxUpdateCatColor(catId) {
+  console.log("[JS] update cat color", catId);
+  let c = document.getElementById('catColor' + catId).value;
+  fetch("{{ url_for('ajax_update_category_color') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "cat_id=" + catId + "&new_color=" + encodeURIComponent(c)
+  })
+  .then(r => r.json())
+  .then(resp => {
+    if (resp.status === "ok") {
+      showToast(resp.message);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+// Toggle "Show as Group"
+function ajaxToggleShowGroup(catId) {
+  console.log("[JS] toggle show group for cat", catId);
+  fetch("{{ url_for('ajax_toggle_show_group') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "cat_id=" + catId
+  })
+  .then(r => r.json())
+  .then(resp => {
+    if (resp.status === "ok") {
+      showToast(resp.message);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+// Assign group
+function ajaxAssignGroup(catId) {
+  console.log("[JS] assign group for cat", catId);
+  let g = document.getElementById('catGroup' + catId).value;
+  fetch("{{ url_for('ajax_assign_group') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "cat_id=" + catId + "&group_id=" + encodeURIComponent(g)
+  })
+  .then(r => r.json())
+  .then(resp => {
+    if (resp.status === "ok") {
+      showToast(resp.message);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+// Add rule to category
+function ajaxAddRule(catId) {
+  console.log("[JS] add rule to cat", catId);
+  let r = document.getElementById('ruleWord' + catId).value;
+  fetch("{{ url_for('ajax_add_rule') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "cat_id=" + catId + "&rule_word=" + encodeURIComponent(r)
+  })
+  .then(r => r.json())
+  .then(resp => {
+    if (resp.status === "ok") {
+      showToast(resp.message);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+// Remove rule from category
+function ajaxRemoveRule(catId, rule) {
+  console.log("[JS] remove rule from cat", catId, rule);
+  fetch("{{ url_for('ajax_remove_rule') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "cat_id=" + catId + "&rule_word=" + encodeURIComponent(rule)
+  })
+  .then(r => r.json())
+  .then(resp => {
+    if (resp.status === "ok") {
+      showToast(resp.message);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+// Delete category
+function ajaxDeleteCategory(catId) {
+  console.log("[JS] delete cat", catId);
+  if (!confirm("Delete category ID=" + catId + "?")) return;
+  fetch("{{ url_for('ajax_delete_category') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "cat_id=" + catId
+  })
+  .then(r => r.json())
+  .then(resp => {
+    if (resp.status === "ok") {
+      showToast(resp.message);
+      setTimeout(() => { location.reload(); }, 1000);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+</script>

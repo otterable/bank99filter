@@ -1,0 +1,37 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Transactions for List: {{ the_list['name'] }}</h2>
+<a href="{{ url_for('manage_lists') }}" class="btn btn-secondary mb-3">Back to Lists</a>
+
+{% if items %}
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Buchungsdatum</th>
+      <th>Text</th>
+      <th>Betrag</th>
+      <th>Refundable?</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for idx, trx, is_refund in items %}
+    <tr {% if is_refund %} style="text-decoration: line-through;" {% endif %}>
+      <td>{{ idx }}</td>
+      <td>{{ trx['Buchungsdatum'] }}</td>
+      <td>{{ trx['Buchungstext'] }} / {{ trx['Umsatztext'] }}</td>
+      <td>{{ "%.2f"|format(trx['Betrag']) }} €</td>
+      <td>{{ 'Yes' if is_refund else 'No' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="mt-3">
+  <strong>Total in this list:</strong> {{ "%.2f"|format(total) }} €
+</p>
+{% else %}
+<div class="alert alert-info">
+  No transactions in this list.
+</div>
+{% endif %}
+{% endblock %}

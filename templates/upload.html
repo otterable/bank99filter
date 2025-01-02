@@ -1,0 +1,11 @@
+{% extends 'layout.html' %}
+{% block content %}
+  <h2>Upload CSV Files</h2>
+  <form method="POST" enctype="multipart/form-data">
+    <div class="mb-3">
+      <label for="formFileMultiple" class="form-label">Choose one or more CSV files</label>
+      <input class="form-control" type="file" id="formFileMultiple" name="files[]" multiple>
+    </div>
+    <button type="submit" class="btn btn-primary">Upload</button>
+  </form>
+{% endblock %}

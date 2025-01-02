@@ -1,0 +1,151 @@
+{% extends 'layout.html' %}
+{% block content %}
+
+<style>
+  /* For the main text column */
+  .text-col {
+    word-wrap: break-word;
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+
+  /* For the date+cat+assign column (everything else) */
+  .date-cat-assign-col {
+    word-wrap: break-word;
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+
+  .assign-btn {
+    margin: 0 !important;
+  }
+</style>
+
+<h2>Category: {{ category.name }}</h2>
+
+<!-- Summaries (like transactions) -->
+<div class="mb-3">
+  <strong>Total expenses:</strong> {{ "%.2f"|format(total) }}<br>
+  <strong>Refundable expenses:</strong> {{ "%.2f"|format(refundable) }}<br>
+  <strong>Total after refunds:</strong> {{ "%.2f"|format(after_refund) }}
+</div>
+
+<!-- Sorting form -->
+<form action="{{ url_for('view_category_transactions', cat_id=category.id) }}" method="GET" class="mb-3">
+  <label>Sort by:</label>
+  <select name="sort" class="form-select d-inline-block" style="width:auto;">
+    <option value="lowest" {% if sort_mode=='lowest' %}selected{% endif %}>Lowest Amount</option>
+    <option value="highest" {% if sort_mode=='highest' %}selected{% endif %}>Highest Amount</option>
+    <option value="latest_date" {% if sort_mode=='latest_date' %}selected{% endif %}>Latest Date</option>
+    <option value="oldest_date" {% if sort_mode=='oldest_date' %}selected{% endif %}>Oldest Date</option>
+  </select>
+  <button class="btn btn-sm btn-primary">Apply</button>
+</form>
+
+<div class="table-responsive">
+  <table class="table table-striped table-bordered align-middle">
+    <thead>
+      <tr>
+        <!-- Hidden index for internal logic -->
+        <th style="display:none;">#</th>
+        <th class="text-col">Text</th>
+        <th>Amount</th>
+        <th class="date-cat-assign-col">Data</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for trx, cat_name, cat_color, idx in transactions_data %}
+      <tr>
+        <!-- Hidden index -->
+        <td style="display:none;">{{ idx }}</td>
+        
+        <!-- Text column -->
+        <td class="text-col">
+          {{ trx['Buchungstext'] }} / {{ trx['Umsatztext'] }}
+          <br>
+          <small>{{ trx['Name des Partners'] }}</small>
+        </td>
+
+        <!-- Amount -->
+        <td>{{ "%.2f"|format(trx['Betrag']) }}</td>
+
+        <!-- Combined date + category + assign -->
+        <td class="date-cat-assign-col">
+          <!-- 1) Date (reformatted) -->
+          <div>
+            {% if trx['Buchungsdatum'] and '-' in trx['Buchungsdatum'] %}
+              {% set parts = trx['Buchungsdatum'].split('-') %}
+              {% if parts|length == 3 %}
+                {{ parts[2] }}.{{ parts[1] }}.{{ parts[0] }}
+              {% else %}
+                {{ trx['Buchungsdatum'] }}
+              {% endif %}
+            {% else %}
+              {{ trx['Buchungsdatum'] }}
+            {% endif %}
+          </div>
+
+          <!-- 2) Category name -->
+          <div class="mt-1" style="background-color: {{ cat_color }}; padding: 2px 4px; display: inline-block;">
+            {{ cat_name }}
+          </div>
+
+          <!-- 3) Assign dropdown (AJAX approach) -->
+          <div class="dropdown mt-1">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle assign-btn"
+                    type="button" data-bs-toggle="dropdown">
+              <span class="navbar-toggler-icon"></span>
+              Assign
+            </button>
+            <ul class="dropdown-menu p-2" style="min-width: 220px;">
+              <li class="mb-2">
+                <strong>Category:</strong>
+                <div class="d-flex flex-wrap mt-1" style="gap: 4px;">
+                  {% for cat_item in categories %}
+                  <button class="btn btn-sm btn-outline-dark"
+                          type="button"
+                          style="color: {{ cat_item['color'] }};"
+                          title="Assign {{ cat_item['name'] }}"
+                          onclick="reassignCategory({{ idx }}, {{ cat_item['id'] }})">
+                    {{ cat_item['name'] }}
+                  </button>
+                  {% endfor %}
+                </div>
+              </li>
+            </ul>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Optional: Link back to categories page -->
+<a href="{{ url_for('manage_categories') }}" class="btn btn-secondary mt-3">Back to Categories</a>
+
+<!-- AJAX script to reassign transaction -->
+<script>
+function reassignCategory(trxIndex, newCatId) {
+  if(!confirm("Reassign this transaction to the new category?")) return;
+  fetch("{{ url_for('ajax_assign_category') }}", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trx_index: trxIndex, cat_id: newCatId })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if(data.status === "ok") {
+      alert(data.message);
+      location.reload(); // refresh page to see updated category
+    } else {
+      alert("Error: " + data.message);
+    }
+  })
+  .catch(err => {
+    alert("AJAX error: " + err);
+  });
+}
+</script>
+
+{% endblock %}

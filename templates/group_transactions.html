@@ -1,0 +1,34 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Transactions for Group: {{ group['name'] }}</h2>
+<a href="{{ url_for('manage_categories') }}" class="btn btn-secondary mb-3">Back</a>
+
+{% if results %}
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Buchungsdatum</th>
+      <th>Text</th>
+      <th>Betrag</th>
+      <th>Category</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for idx, trx, cat_name in results %}
+    <tr>
+      <td>{{ idx }}</td>
+      <td>{{ trx['Buchungsdatum'] }}</td>
+      <td>{{ trx['Buchungstext'] }} / {{ trx['Umsatztext'] }}</td>
+      <td>{{ "%.2f"|format(trx['Betrag']) }} €</td>
+      <td>{{ cat_name }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="alert alert-info">
+  No transactions found for this group.
+</div>
+{% endif %}
+{% endblock %}

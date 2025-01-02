@@ -1,0 +1,637 @@
+{% extends 'layout.html' %}
+{% block content %}
+
+<!-- 
+  A fixed container for AJAX success messages. 
+  We'll set display:none by default, then show/hide it with JS.
+-->
+<div id="ajaxMsgBox"
+     style="display:none; position: fixed; top: 10px; right: 10px; z-index: 9999;"
+     class="alert alert-success">
+</div>
+
+<h2>Categories & Groups</h2>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <a href="{{ url_for('export_categories') }}" class="btn btn-success">
+      Export as JSON
+    </a>
+  </div>
+  <div>
+    <form action="{{ url_for('import_categories') }}" method="POST" enctype="multipart/form-data" class="d-inline">
+      <label for="categories_json" class="form-label me-2">Import JSON:</label>
+      <input type="file" id="categories_json" name="categories_json" accept=".json" required>
+      <button type="submit" class="btn btn-secondary">Import</button>
+    </form>
+  </div>
+</div>
+
+<!-- Organized by groups -->
+{% for g_id, obj in group_map.items() %}
+  <h4 class="mt-3">{{ obj.group['name'] }} (Group ID: {{ obj.group['id'] }})</h4>
+  <div class="ms-3">
+    {% for cat in obj.categories %}
+    <!-- Single category block -->
+    <div class="border p-2 mb-2" id="catContainer{{ cat['id'] }}">
+      <!-- Top row: Category name/ID, color, "View Transactions" -->
+      <div class="d-flex align-items-center justify-content-between">
+        <div>
+          <!-- We add IDs to reflect real-time changes -->
+          <strong id="catNameDisplay{{ cat['id'] }}">{{ cat['name'] }}</strong>
+          (ID: {{ cat['id'] }})
+          <!-- color swatch ID: catColorSwatch -->
+          <span class="ms-2"
+                id="catColorSwatch{{ cat['id'] }}"
+                style="background-color: {{ cat['color'] }}; padding: 0 10px;">
+            {{ cat['color'] }}
+          </span>
+        </div>
+        <div>
+          <a href="{{ url_for('view_category_transactions', cat_id=cat['id']) }}"
+             class="btn btn-sm btn-info">
+            View Transactions
+          </a>
+        </div>
+      </div>
+
+      <!-- Category actions dropdown -->
+      <div class="dropdown d-inline-block mt-2">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                data-bs-toggle="dropdown">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <!-- 
+          We add p-3 and a min-width to give it more space.
+        -->
+        <ul class="dropdown-menu p-3" style="min-width: 280px;">
+          <!-- Rename -->
+          <li class="mb-3">
+            <label>Rename:</label>
+            <input type="text" class="form-control form-control-sm"
+                   id="catName{{ cat['id'] }}"
+                   value="{{ cat['name'] }}">
+            <button class="btn btn-sm btn-outline-success mt-1"
+                    onclick="ajaxRenameCat({{cat['id']}})">
+              Save
+            </button>
+          </li>
+
+          <!-- Update color -->
+          <li class="mb-3">
+            <label>Update Color:</label>
+            <input type="color" class="form-control form-control-color"
+                   id="catColor{{ cat['id'] }}"
+                   value="{{ cat['color'] }}">
+            <button class="btn btn-sm btn-outline-primary mt-1"
+                    onclick="ajaxUpdateCatColor({{cat['id']}})">
+              Update
+            </button>
+          </li>
+
+          <!-- Toggle "Show as Group" -->
+          <li class="mb-3">
+            <label>Toggle Show-as-Group:</label>
+            <button class="btn btn-sm 
+              {% if cat.get('show_up_as_group') %}btn-warning{% else %}btn-outline-warning{% endif %}"
+              onclick="ajaxToggleShowGroup({{cat['id']}})">
+              {% if cat.get('show_up_as_group') %}
+                Disable
+              {% else %}
+                Enable
+              {% endif %}
+            </button>
+          </li>
+
+          <!-- Assign Group -->
+          <li class="mb-3">
+            <label>Assign Group:</label>
+            <select id="catGroup{{cat['id']}}" class="form-select form-select-sm">
+              <option value="">-- None --</option>
+              {% for g in groups %}
+              <option value="{{ g['id'] }}"
+                {% if cat['group_id'] == g['id'] %}selected{% endif %}>
+                {{ g['name'] }}
+              </option>
+              {% endfor %}
+            </select>
+            <button class="btn btn-sm btn-outline-secondary mt-1"
+                    onclick="ajaxAssignGroup({{cat['id']}})">
+              Set
+            </button>
+          </li>
+
+          <!-- Rules -->
+          <li class="mb-3">
+            <label>Rules:</label>
+            <div id="catRules{{ cat['id'] }}">
+              {% for rule in cat['rules'] %}
+              <span class="badge bg-info text-dark me-1 mb-1">
+                {{ rule }}
+                <button class="btn-close btn-close-white ms-1"
+                        style="float:right;"
+                        onclick="ajaxRemoveRule({{cat['id']}}, '{{rule}}')">
+                </button>
+              </span>
+              {% endfor %}
+            </div>
+            <div class="input-group input-group-sm mt-1" style="max-width: 200px;">
+              <input type="text" id="ruleWord{{cat['id']}}" class="form-control" placeholder="Add rule...">
+              <button class="btn btn-secondary"
+                      onclick="ajaxAddRule({{cat['id']}})">
+                Add
+              </button>
+            </div>
+          </li>
+
+          <li><hr class="dropdown-divider"></li>
+
+          <!-- Delete category -->
+          <li>
+            <button class="btn btn-sm btn-danger"
+                    onclick="ajaxDeleteCategory({{cat['id']}})">
+              Delete Category
+            </button>
+          </li>
+        </ul>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+{% endfor %}
+
+<h4 class="mt-4">(No Group)</h4>
+<div class="ms-3">
+  {% for cat in no_group_cats %}
+  <div class="border p-2 mb-2" id="catContainer{{ cat['id'] }}">
+    <div class="d-flex align-items-center justify-content-between">
+      <div>
+        <strong id="catNameDisplay{{ cat['id'] }}">{{ cat['name'] }}</strong>
+        (ID: {{ cat['id'] }})
+        <span class="ms-2"
+              id="catColorSwatch{{ cat['id'] }}"
+              style="background-color: {{ cat['color'] }}; padding: 0 10px;">
+          {{ cat['color'] }}
+        </span>
+      </div>
+      <div>
+        <a href="{{ url_for('view_category_transactions', cat_id=cat['id']) }}"
+           class="btn btn-sm btn-info">
+          View Transactions
+        </a>
+      </div>
+    </div>
+
+    <div class="dropdown d-inline-block mt-2">
+      <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+              data-bs-toggle="dropdown">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <ul class="dropdown-menu p-3" style="min-width: 280px;">
+        <!-- Rename -->
+        <li class="mb-3">
+          <label>Rename:</label>
+          <input type="text" class="form-control form-control-sm"
+                 id="catName{{ cat['id'] }}"
+                 value="{{ cat['name'] }}">
+          <button class="btn btn-sm btn-outline-success mt-1"
+                  onclick="ajaxRenameCat({{cat['id']}})">
+            Save
+          </button>
+        </li>
+
+        <!-- Update color -->
+        <li class="mb-3">
+          <label>Update Color:</label>
+          <input type="color" class="form-control form-control-color"
+                 id="catColor{{ cat['id'] }}"
+                 value="{{ cat['color'] }}">
+          <button class="btn btn-sm btn-outline-primary mt-1"
+                  onclick="ajaxUpdateCatColor({{cat['id']}})">
+            Update
+          </button>
+        </li>
+
+        <!-- Toggle "Show as Group" -->
+        <li class="mb-3">
+          <label>Toggle Show-as-Group:</label>
+          <button class="btn btn-sm 
+            {% if cat.get('show_up_as_group') %}btn-warning{% else %}btn-outline-warning{% endif %}"
+            onclick="ajaxToggleShowGroup({{cat['id']}})">
+            {% if cat.get('show_up_as_group') %}
+              Disable
+            {% else %}
+              Enable
+            {% endif %}
+          </button>
+        </li>
+
+        <!-- Assign group -->
+        <li class="mb-3">
+          <label>Assign Group:</label>
+          <select id="catGroup{{cat['id']}}" class="form-select form-select-sm">
+            <option value="">-- None --</option>
+            {% for g in groups %}
+            <option value="{{ g['id'] }}"
+              {% if cat['group_id'] == g['id'] %}selected{% endif %}>
+              {{ g['name'] }}
+            </option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-sm btn-outline-secondary mt-1"
+                  onclick="ajaxAssignGroup({{cat['id']}})">
+            Set
+          </button>
+        </li>
+
+        <!-- Rules -->
+        <li class="mb-3">
+          <label>Rules:</label>
+          <div id="catRules{{ cat['id'] }}">
+            {% for rule in cat['rules'] %}
+            <span class="badge bg-info text-dark me-1 mb-1">
+              {{ rule }}
+              <button class="btn-close btn-close-white ms-1"
+                      style="float:right;"
+                      onclick="ajaxRemoveRule({{cat['id']}}, '{{rule}}')">
+              </button>
+            </span>
+            {% endfor %}
+          </div>
+          <div class="input-group input-group-sm mt-1" style="max-width: 200px;">
+            <input type="text" id="ruleWord{{cat['id']}}" class="form-control" placeholder="Add rule...">
+            <button class="btn btn-secondary"
+                    onclick="ajaxAddRule({{cat['id']}})">
+              Add
+            </button>
+          </div>
+        </li>
+
+        <li><hr class="dropdown-divider"></li>
+
+        <!-- Delete category -->
+        <li>
+          <button class="btn btn-sm btn-danger"
+                  onclick="ajaxDeleteCategory({{cat['id']}})">
+            Delete Category
+          </button>
+        </li>
+      </ul>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if uncategorized_count > 0 %}
+  <h4 class="mt-4">(Uncategorized)</h4>
+  <div class="ms-3">
+    <p class="text-muted">Transactions with no category: {{ uncategorized_count }}</p>
+  </div>
+{% endif %}
+
+<hr>
+<h3>Create New Category</h3>
+<form action="{{ url_for('create_category') }}" method="POST">
+  <div class="mb-3">
+    <label for="cat_name" class="form-label">Name</label>
+    <input type="text" class="form-control" name="category_name" id="cat_name" required>
+  </div>
+  <div class="mb-3">
+    <label for="cat_color" class="form-label">Color</label>
+    <input type="color" class="form-control form-control-color" 
+           name="category_color" id="cat_color"
+           value="#ffffff" title="Choose your color">
+  </div>
+  <button type="submit" class="btn btn-primary">Create Category</button>
+</form>
+
+<hr>
+<h2>Groups</h2>
+{% for g in groups %}
+<div class="border p-2 mb-2">
+  <h5 class="mb-1">
+    {{ g['name'] }} (Group ID: {{ g['id'] }})
+    <button class="btn btn-sm btn-danger float-end"
+            onclick="deleteGroup({{ g['id'] }})">
+      Delete
+    </button>
+  </h5>
+
+  <div class="dropdown d-inline-block mb-2">
+    <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button"
+            data-bs-toggle="dropdown">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <ul class="dropdown-menu p-3" style="min-width: 240px;">
+      <li class="mb-3">
+        <label>Rename Group:</label>
+        <input type="text" class="form-control form-control-sm"
+               id="gName{{g['id']}}" value="{{ g['name'] }}">
+        <button class="btn btn-sm btn-outline-success mt-1"
+                onclick="ajaxRenameGroup({{g['id']}})">
+          Save
+        </button>
+      </li>
+      <li>
+        <label>Update Color:</label>
+        <input type="color" class="form-control form-control-color"
+               id="gColor{{g['id']}}" value="{{ g['color'] }}">
+        <button class="btn btn-sm btn-outline-primary mt-1"
+                onclick="ajaxUpdateGroupColor({{g['id']}})">
+          Update
+        </button>
+      </li>
+    </ul>
+  </div>
+
+  <p class="mb-1">
+    Color:
+    <span style="background-color: {{ g['color'] }};">
+      {{ g['color'] }}
+    </span>
+  </p>
+  <a href="{{ url_for('view_group_transactions', group_id=g['id']) }}"
+     class="btn btn-sm btn-info">
+    View Transactions
+  </a>
+</div>
+{% endfor %}
+
+<h3>Create New Group</h3>
+<form action="{{ url_for('create_group') }}" method="POST">
+  <div class="mb-3">
+    <label for="group_name" class="form-label">Group Name</label>
+    <input type="text" class="form-control" name="group_name" id="group_name" required>
+  </div>
+  <div class="mb-3">
+    <label for="group_color" class="form-label">Color</label>
+    <input type="color" class="form-control form-control-color"
+           name="group_color" id="group_color" value="#888888"
+           title="Choose group color">
+  </div>
+  <button type="submit" class="btn btn-primary">Create Group</button>
+</form>
+
+<!-- 
+  JS Functions for Groups and Categories (with toasts)
+  Ensure that showToast() is called whenever an AJAX operation succeeds,
+  and we update the DOM in real time if possible.
+-->
+<script>
+let toastTimer = null;
+
+/** 
+ * Show a green popup (alert) on the top-right with a message.
+ * It hides automatically after 3 seconds, or if called again with a new message,
+ * it resets the timer.
+ */
+function showToast(msg) {
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  const msgBox = document.getElementById("ajaxMsgBox");
+  msgBox.innerText = msg;
+  msgBox.style.display = "block";
+  msgBox.classList.remove("alert-danger");
+  msgBox.classList.add("alert-success");
+
+  toastTimer = setTimeout(() => {
+    msgBox.style.display = "none";
+    toastTimer = null;
+  }, 3000);
+}
+
+// ---------- GROUP AJAX -----------
+function deleteGroup(gid) {
+  console.log("[JS] deleteGroup", gid);
+  if(!confirm("Delete group " + gid + "?")) return;
+  fetch("{{ url_for('ajax_delete_group') }}", {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    body: "group_id="+gid
+  })
+  .then(r => r.json())
+  .then(resp => {
+    if(resp.status=="ok") {
+      showToast(resp.message);
+      // reload after short delay to remove the group from DOM fully.
+      setTimeout(() => { location.reload(); }, 1000);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+function ajaxRenameGroup(gid) {
+  console.log("[JS] renameGroup", gid);
+  let new_name = document.getElementById("gName"+gid).value;
+  fetch("{{ url_for('ajax_rename_group') }}", {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    body: "group_id="+gid+"&new_name="+encodeURIComponent(new_name)
+  })
+  .then(r => r.json())
+  .then(resp=>{
+    if(resp.status=="ok"){
+      showToast(resp.message);
+      // Update the text in real time if you want:
+      // find the group's heading <h5> or so. But we have no unique ID.
+      // For simplicity, just do reload if you want immediate correctness.
+      // location.reload();
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+function ajaxUpdateGroupColor(gid) {
+  console.log("[JS] updateGroupColor", gid);
+  let new_color = document.getElementById("gColor"+gid).value;
+  fetch("{{ url_for('ajax_update_group_color') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"group_id="+gid+"&new_color="+encodeURIComponent(new_color)
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status=="ok"){
+      showToast(resp.message);
+      // you might want to update the color <span> in real time:
+      // e.g. document.querySelector("#someGroupColorSpan"+gid).style.backgroundColor = new_color;
+      // or simply reload to reflect new color in the group block.
+      // location.reload();
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+// ---------- CATEGORY AJAX -----------
+function ajaxRenameCat(catId) {
+  console.log("[JS] rename cat", catId);
+  let new_name = document.getElementById('catName' + catId).value;
+  fetch("{{ url_for('ajax_rename_category') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body: "cat_id="+catId+"&new_name="+encodeURIComponent(new_name)
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status=="ok"){
+      showToast(resp.message);
+      // Reflect the new name in the DOM right away:
+      document.getElementById('catNameDisplay' + catId).innerText = new_name;
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+function ajaxUpdateCatColor(catId) {
+  console.log("[JS] update cat color", catId);
+  let c = document.getElementById('catColor' + catId).value;
+  fetch("{{ url_for('ajax_update_category_color') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body: "cat_id="+catId+"&new_color="+encodeURIComponent(c)
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status=="ok"){
+      showToast(resp.message);
+      // Immediately reflect new color swatch + text:
+      const swatch = document.getElementById("catColorSwatch" + catId);
+      if (swatch) {
+        swatch.style.backgroundColor = c;
+        swatch.innerText = c;
+      }
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+function ajaxToggleShowGroup(catId) {
+  console.log("[JS] toggle show group for cat", catId);
+  fetch("{{ url_for('ajax_toggle_show_group') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body: "cat_id="+catId
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status=="ok"){
+      showToast(resp.message);
+      // Possibly reflect the new "show_as_group" button style.
+      // For now, do nothing else in the DOM.
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+function ajaxAssignGroup(catId) {
+  console.log("[JS] assign group for cat", catId);
+  let g = document.getElementById('catGroup' + catId).value;
+  fetch("{{ url_for('ajax_assign_group') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body: "cat_id="+catId+"&group_id="+encodeURIComponent(g)
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status=="ok"){
+      showToast(resp.message);
+      // Because changing group might mean we must move this category's DOM element
+      // to another group's container, let's just do a short reload:
+      setTimeout(() => { location.reload(); }, 1000);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+function ajaxAddRule(catId) {
+  console.log("[JS] add rule to cat", catId);
+  let r = document.getElementById('ruleWord' + catId).value;
+  fetch("{{ url_for('ajax_add_rule') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"cat_id="+catId+"&rule_word="+encodeURIComponent(r)
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status=="ok"){
+      showToast(resp.message);
+      // Add the new rule badge immediately:
+      const rulesDiv = document.getElementById("catRules" + catId);
+      if (rulesDiv) {
+        // create a new <span class="badge bg-info text-dark me-1 mb-1"> ...
+        let span = document.createElement("span");
+        span.className = "badge bg-info text-dark me-1 mb-1";
+        span.innerHTML = `
+          ${r}
+          <button class="btn-close btn-close-white ms-1"
+                  style="float:right;"
+                  onclick="ajaxRemoveRule(${catId}, '${r}')"></button>
+        `;
+        rulesDiv.appendChild(span);
+      }
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+function ajaxRemoveRule(catId, rule) {
+  console.log("[JS] remove rule from cat", catId, rule);
+  fetch("{{ url_for('ajax_remove_rule') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"cat_id="+catId+"&rule_word="+encodeURIComponent(rule)
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status=="ok"){
+      showToast(resp.message);
+      // Remove that rule badge from DOM:
+      // Easiest approach: reload or do a small search for the span.
+      // We'll do a small search in the catRules container:
+      const rulesDiv = document.getElementById("catRules" + catId);
+      if (rulesDiv) {
+        // find a badge containing 'rule' text. We'll do a naive approach:
+        let badges = rulesDiv.querySelectorAll(".badge");
+        badges.forEach(badge => {
+          if (badge.innerText.trim().startsWith(rule)) {
+            badge.remove();
+          }
+        });
+      }
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+function ajaxDeleteCategory(catId) {
+  console.log("[JS] delete cat", catId);
+  if(!confirm("Delete category ID="+catId+"?")) return;
+  fetch("{{ url_for('ajax_delete_category') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"cat_id="+catId
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status=="ok"){
+      showToast(resp.message);
+      // remove this cat's container from DOM
+      const container = document.getElementById("catContainer" + catId);
+      if (container) {
+        container.remove();
+      }
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+</script>
+{% endblock %}

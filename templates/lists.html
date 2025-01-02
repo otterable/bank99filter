@@ -1,0 +1,96 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Manage Lists</h2>
+
+<form action="{{ url_for('create_list') }}" method="POST" class="mb-3">
+  <div class="mb-3">
+    <label for="list_name" class="form-label">List Name</label>
+    <input type="text" class="form-control" id="list_name" name="list_name" required>
+  </div>
+  <div class="mb-3">
+    <label for="list_color" class="form-label">Color</label>
+    <input type="color" class="form-control form-control-color" id="list_color" name="list_color" value="#0000ff">
+  </div>
+  <div class="mb-3 form-check">
+    <input class="form-check-input" type="checkbox" id="refund_list" name="refund_list" value="1">
+    <label class="form-check-label" for="refund_list">Refund List?</label>
+  </div>
+  <button class="btn btn-primary">Create List</button>
+</form>
+
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>List ID</th>
+      <th>Name</th>
+      <th>Color</th>
+      <th>Refund?</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for l in lists_data %}
+    <tr>
+      <td>{{ l['id'] }}</td>
+      <td>
+        <form action="{{ url_for('rename_list', list_id=l['id']) }}" method="POST" class="d-inline">
+          <input type="text" class="form-control form-control-sm d-inline-block" style="width:120px;"
+                 name="new_name" value="{{ l['name'] }}">
+          <button class="btn btn-sm btn-outline-success">Rename</button>
+        </form>
+      </td>
+      <td style="background-color: {{ l['color'] }};">{{ l['color'] }}</td>
+      <td>
+        <form action="{{ url_for('toggle_refund_list', list_id=l['id']) }}" method="POST" class="d-inline">
+          <button class="btn btn-sm {% if l['refund_list'] %}btn-warning{% else %}btn-outline-warning{% endif %}" type="submit">
+            {% if l['refund_list'] %}YES{% else %}NO{% endif %}
+          </button>
+        </form>
+      </td>
+      <td>
+        <a href="{{ url_for('view_list_transactions', list_id=l['id']) }}" class="btn btn-info btn-sm">View</a>
+        <form action="{{ url_for('delete_list', list_id=l['id']) }}" method="POST" class="d-inline">
+          <button class="btn btn-danger btn-sm" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<hr>
+<h3>Add Transactions to a List</h3>
+<form action="{{ url_for('add_trx_to_list') }}" method="POST" class="row g-3">
+  <div class="col-auto">
+    <select name="list_id" class="form-select">
+      {% for l in lists_data %}
+      <option value="{{ l['id'] }}">{{ l['name'] }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <input type="number" name="trx_index" placeholder="Transaction index" class="form-control" min="0">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-secondary">Add Transaction</button>
+  </div>
+</form>
+
+<hr>
+<h3>Remove Transactions from a List</h3>
+<form action="{{ url_for('remove_trx_from_list') }}" method="POST" class="row g-3">
+  <div class="col-auto">
+    <select name="list_id" class="form-select">
+      {% for l in lists_data %}
+      <option value="{{ l['id'] }}">{{ l['name'] }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <input type="number" name="trx_index" placeholder="Transaction index" class="form-control" min="0">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-secondary">Remove Transaction</button>
+  </div>
+</form>
+{% endblock %}
