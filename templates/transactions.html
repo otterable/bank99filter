@@ -1,7 +1,9 @@
+<!--templates/transactions.html-->
 {% extends 'layout.html' %}
 {% block content %}
 
 <style>
+  /* (Unchanged existing CSS) */
   .table.table-striped.table-bordered.align-middle {
     table-layout: fixed;
     width: 100%;
@@ -34,22 +36,148 @@
     overflow-wrap: break-word;
     margin: 0 !important;
   }
-  .dropdown-menu {
-    max-width: 300px;
-    white-space: normal;
-    overflow-wrap: break-word;
-  }
   .assign-btn {
     margin: 0 !important;
   }
   .list-badge {
     margin-right: 4px;
   }
+
+  .category-label {
+    display: inline-block;
+    padding: 4px 12px;
+    color: white;
+    font-weight: bold;
+    border-radius: 30px;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: default;
+  }
+
+  .assign-button {
+    background-color: #003056 !important;
+    color: #ffffff !important;
+    font-weight: bold !important;
+    border-radius: 30px !important;
+    border: none !important;
+    padding: 6px 16px;
+    cursor: pointer;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tooltip-text {
+    position: relative;
+    display: inline-block;
+    cursor: pointer;
+  }
+  .tooltip-text .tooltip-content {
+    visibility: hidden;
+    width: 300px;
+    background-color: #333;
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 8px;
+    position: absolute;
+    z-index: 10000;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    word-wrap: break-word;
+  }
+  .tooltip-text:hover .tooltip-content {
+    visibility: visible;
+    opacity: 1;
+  }
+
+  .mobile-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 9999;
+    overflow-y: auto;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  .mobile-overlay .overlay-content {
+    background-color: #fff;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 600px;
+    padding: 20px;
+    position: relative;
+    margin: 50px auto;
+  }
+  
+  .overlay-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+  }
+  
+  .close-overlay-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+  }
+  
+  .btn-catAction {
+    background-color: #003056 !important;
+    color: #ffffff !important;
+    border-radius: 30px !important;
+    font-weight: bold !important;
+    border: none !important;
+    padding: 6px 16px;
+    cursor: pointer;
+  }
+  .btn-delete {
+    background-color: #9a031e !important;
+    color: #ffffff !important;
+    border-radius: 30px !important;
+    font-weight: bold !important;
+    border: none !important;
+  }
+  .truncated-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+    word-wrap: break-word;
+  }
+  .overlay .category-button {
+    background-color: #003056 !important;
+    color: #ffffff !important;
+    font-weight: bold !important;
+    border-radius: 30px !important;
+    border: none !important;
+    padding: 6px 16px;
+    cursor: pointer;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .overlay-button {
+    margin-bottom: 1rem;
+    margin-right: 1rem;
+  }
 </style>
 
 <h2>Transactions</h2>
 
-<!-- Global expense stats -->
 <div class="mb-3">
   <strong>Total expenses:</strong> {{ "%.2f"|format(total) }} €<br>
   <strong>Refundable expenses:</strong> {{ "%.2f"|format(refundable) }} €<br>
@@ -68,10 +196,118 @@
   <button class="btn btn-sm btn-primary">Apply</button>
 </form>
 
-<!-- Re-classify button -->
-<form method="POST" action="{{ url_for('classify_all_transactions') }}" style="margin:0;padding:0;">
-  <button type="submit" class="btn btn-warning mb-3">Re-Classify All</button>
-</form>
+<!-- JSON / CSV Overlay Buttons -->
+<div class="mt-3">
+  <button class="btn btn-secondary overlay-button" onclick="openCsvOverlay()">.csv list</button>
+  <button class="btn btn-secondary overlay-button" onclick="openJsonOverlay()">.json list</button>
+</div>
+
+<!-- CSV overlay -->
+<div id="csvOverlay" class="mobile-overlay">
+  <div class="overlay-content">
+    <div class="overlay-header">
+      <h5>.CSV Files</h5>
+      <button class="close-overlay-btn" onclick="closeCsvOverlay()">×</button>
+    </div>
+    <div>
+      <!-- List the currently "known" CSV files -->
+      <p><strong>Uploaded CSV Files:</strong></p>
+      {% if uploaded_csv_files %}
+        <ul id="uploadedCsvList">
+        {% for fname in uploaded_csv_files %}
+          <li id="csvItem{{ fname|replace('.', '_') }}">
+            {{ fname }}
+            <!-- Buttons: parse or delete. We'll do AJAX calls. -->
+            <button class="btn btn-sm btn-info ms-2"
+                    type="button"
+                    onclick="parseCSV('{{ fname }}')">
+              Parse
+            </button>
+            <button class="btn btn-sm btn-danger ms-2"
+                    type="button"
+                    onclick="deleteCSV('{{ fname }}')">
+              Delete
+            </button>
+          </li>
+        {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-muted">No uploaded CSV files yet.</p>
+      {% endif %}
+
+      <hr>
+      <!-- Single form with parse_on_upload checkbox -->
+      <form action="{{ url_for('upload_csv_files') }}" method="POST" enctype="multipart/form-data">
+        <label for="csv_files" class="form-label">Add CSV:</label>
+        <input type="file" id="csv_files" name="csv_files[]" multiple class="form-control mb-2">
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="parse_on_upload" name="parse_on_upload">
+          <label class="form-check-label" for="parse_on_upload">Parse immediately?</label>
+        </div>
+        <button class="btn btn-primary">Upload CSV</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- JSON overlay (unchanged) -->
+<div id="jsonOverlay" class="mobile-overlay">
+  <div class="overlay-content">
+    <div class="overlay-header">
+      <h5>.JSON Files</h5>
+      <button class="close-overlay-btn" onclick="closeJsonOverlay()">×</button>
+    </div>
+    <div>
+      <p><strong>Active JSON:</strong>
+        {% if active_json_file %}
+          {{ active_json_file }}
+          <form action="{{ url_for('deselect_categories_json') }}" method="POST" style="display:inline;">
+            <button class="btn btn-sm btn-warning ms-2">Deselect</button>
+          </form>
+        {% else %}
+          <span class="text-muted">None</span>
+        {% endif %}
+      </p>
+      <p><strong>Uploaded JSON Files:</strong></p>
+      {% if uploaded_json_files %}
+        <ul>
+        {% for fname in uploaded_json_files %}
+          <li>
+            {{ fname }}
+            {% if fname != active_json_file %}
+              {% if active_json_file %}
+                <span class="text-muted">(cannot select; already one active)</span>
+              {% else %}
+                <form action="{{ url_for('select_categories_json') }}" method="POST" style="display:inline;">
+                  <input type="hidden" name="filename" value="{{ fname }}">
+                  <button class="btn btn-sm btn-info ms-2">Select</button>
+                </form>
+              {% endif %}
+            {% else %}
+              <span class="text-success">(active)</span>
+            {% endif %}
+          </li>
+        {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-muted">No uploaded JSON files yet.</p>
+      {% endif %}
+
+      <hr>
+      <form action="{{ url_for('upload_categories_json') }}" method="POST" enctype="multipart/form-data">
+        <label for="json_file" class="form-label">Upload Categories JSON:</label>
+        <input type="file" id="json_file" name="json_file" class="form-control mb-2" accept=".json">
+        <button class="btn btn-primary">Upload JSON</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- AJAX Search field -->
+<div class="mb-3 mt-4">
+  <label for="searchInput">Search transactions:</label>
+  <input type="text" id="searchInput" class="form-control" placeholder="Type to search" oninput="performSearch()">
+</div>
 
 <div class="table-responsive" style="margin:0;padding:0;">
   <table class="table table-striped table-bordered align-middle">
@@ -83,29 +319,22 @@
         <th class="date-cat-assign-col">Data</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="transactionTbody">
       {% for trx, cat_name, cat_color, idx in transactions_data %}
       <tr>
-        <!-- Hidden index -->
         <td style="display:none;">{{ idx }}</td>
-
-        <!-- Text column -->
         <td class="text-col">
-          <div>
-            {{ trx['Buchungstext'] }} / {{ trx['Umsatztext'] }}
-            <br>
-            <small>{{ trx['Name des Partners'] }}</small>
+          <div class="tooltip-text">
+            {% set full_text = trx['Buchungstext'] ~ ' / ' ~ trx['Umsatztext'] %}
+            <span class="truncated-text" title="{{ full_text }}">
+              {{ full_text[:100] }}{% if full_text|length > 100 %}...{% endif %}
+            </span>
           </div>
+          <br>
+          <small>{{ trx['Name des Partners'] }}</small>
         </td>
-
-        <!-- Amount (centered & bold due to CSS) -->
-        <td class="amount-col">
-          {{ "%.2f"|format(trx['Betrag']) }}
-        </td>
-
-        <!-- Combined date + category + assign -->
+        <td class="amount-col">{{ "%.2f"|format(trx['Betrag']) }}</td>
         <td class="date-cat-assign-col">
-          <!-- 1) Date -->
           <div>
             {% if trx['Buchungsdatum'] and '-' in trx['Buchungsdatum'] %}
               {% set parts = trx['Buchungsdatum'].split('-') %}
@@ -118,13 +347,9 @@
               {{ trx['Buchungsdatum'] }}
             {% endif %}
           </div>
-
-          <!-- 2) Category name (with color background) -->
-          <div id="catLabel{{ idx }}" style="background-color: {{ cat_color }}; display: inline-block; padding:0 4px;">
+          <div id="catLabel{{ idx }}" class="category-label" style="background-color: {{ cat_color }};">
             {{ cat_name }}
           </div>
-
-          <!-- 2.1) Existing Lists (Badges) that include this transaction -->
           <div class="mt-1" id="listBadges{{ idx }}">
             {% for lst in lists_data %}
               {% if idx in lst['transaction_ids'] %}
@@ -134,63 +359,84 @@
               {% endif %}
             {% endfor %}
           </div>
+          <button class="btn btn-sm assign-button mt-1"
+                  type="button"
+                  onclick="openAssignOverlay({{ idx }}, '{{ trx['Buchungstext']|escape }}')">
+            Assign
+          </button>
+          <div id="assignOverlay{{ idx }}" class="mobile-overlay">
+            <div class="overlay-content">
+              <div class="overlay-header">
+                Assign Transaction #{{ idx }}
+                <button class="close-overlay-btn" onclick="closeAssignOverlay({{ idx }})">×</button>
+              </div>
+              <div class="p-3">
+                <p><strong>Transaction ID:</strong> {{ idx }}</p>
+                <p><strong>Text:</strong> {{ trx['Buchungstext'] }} / {{ trx['Umsatztext'] }}</p>
+                <p><strong>Partner:</strong> {{ trx['Name des Partners'] }}</p>
+                <p><strong>Amount:</strong> {{ "%.2f"|format(trx['Betrag']) }} €</p>
+                <p><strong>Date:</strong>
+                  {% if trx['Buchungsdatum'] and '-' in trx['Buchungsdatum'] %}
+                    {% set parts = trx['Buchungsdatum'].split('-') %}
+                    {% if parts|length == 3 %}
+                      {{ parts[2] }}.{{ parts[1] }}.{{ parts[0] }}
+                    {% else %}
+                      {{ trx['Buchungsdatum'] }}
+                    {% endif %}
+                  {% else %}
+                    {{ trx['Buchungsdatum'] }}
+                  {% endif %}
+                </p>
 
-          <!-- 3) Assign dropdown (Category + List) -->
-          <div class="dropdown mt-1">
-            <button class="btn btn-sm btn-outline-secondary dropdown-toggle assign-btn"
-                    type="button" data-bs-toggle="dropdown">
-              <span class="navbar-toggler-icon"></span>
-              Assign
-            </button>
-            <ul class="dropdown-menu p-2">
-              <!-- Assign or Unassign Category -->
-              <li class="mb-2">
-                <strong>Category:</strong>
-                <div class="d-flex flex-wrap mt-1" style="gap: 4px;">
-                  {% for cat in categories %}
-                  <button class="btn btn-sm btn-outline-dark"
-                          type="button"
-                          style="color: {{ cat['color'] }};"
-                          onclick="assignCategoryAjax({{ idx }}, {{ cat['id'] }}, '{{ cat['name'] }}', '{{ cat['color'] }}')">
-                    {{ cat['name'] }}
-                  </button>
-                  {% endfor %}
-                  <!-- Additional "Unassign" button for category -->
-                  <button class="btn btn-sm btn-danger mt-1"
-                          type="button"
-                          onclick="unassignCategoryAjax({{ idx }})">
-                    Unassign
-                  </button>
-                </div>
-              </li>
-
-              <li><hr class="dropdown-divider"/></li>
-
-              <!-- Assign or Unassign from List -->
-              <li>
-                <strong>List:</strong>
-                <div class="d-flex flex-wrap mt-1" style="gap: 4px;">
-                  {% for lst in lists_data %}
-                  <div>
-                    <!-- "Add" to list -->
-                    <button class="btn btn-sm btn-outline-dark mb-1"
+                <hr>
+                <div class="mb-3">
+                  <label><strong>Assign Category:</strong></label>
+                  <div class="d-flex flex-wrap mt-1" style="gap: 4px;">
+                    {% for cat in categories %}
+                      <button class="btn btn-sm category-button overlay-category-button"
+                              type="button"
+                              style="background-color: {{ cat['color'] }};"
+                              onclick="assignCategoryAjax({{ idx }}, {{ cat['id'] }}, '{{ cat['name'] }}', '{{ cat['color'] }}')">
+                        {{ cat['name'] }}
+                      </button>
+                    {% endfor %}
+                    <button class="btn btn-sm btn-danger mt-1"
                             type="button"
-                            onclick="addToListAjax({{ idx }}, {{ lst['id'] }}, '{{ lst['name'] }}')">
-                      +{{ lst['name'] }}
-                    </button>
-                    <!-- "Unassign" from this list -->
-                    <!-- If user wants to remove, call removeFromListAjax(...) -->
-                    <button class="btn btn-sm btn-danger mb-1"
-                            type="button"
-                            onclick="removeFromListAjax({{ idx }}, {{ lst['id'] }}, '{{ lst['name'] }}')">
-                      -{{ lst['name'] }}
+                            onclick="unassignCategoryAjax({{ idx }})">
+                      Unassign
                     </button>
                   </div>
-                  {% endfor %}
                 </div>
-              </li>
-            </ul>
+                <hr>
+                <div class="mb-3">
+                  <label><strong>Assign to Lists:</strong></label>
+                  <div class="d-flex flex-wrap mt-1" style="gap: 4px;">
+                    {% for lst in lists_data %}
+                    <div>
+                      <button class="btn btn-sm btn-outline-dark mb-1"
+                              type="button"
+                              onclick="addToListAjax({{ idx }}, {{ lst['id'] }}, '{{ lst['name'] }}')">
+                        +{{ lst['name'] }}
+                      </button>
+                      <button class="btn btn-sm btn-danger mb-1"
+                              type="button"
+                              onclick="removeFromListAjax({{ idx }}, {{ lst['id'] }}, '{{ lst['name'] }}')">
+                        -{{ lst['name'] }}
+                      </button>
+                    </div>
+                    {% endfor %}
+                  </div>
+                </div>
+                <hr>
+                <div class="text-center">
+                  <button class="btn btn-sm btn-catAction" type="button" onclick="closeAssignOverlay({{ idx }})">
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
+          <!-- end overlay -->
         </td>
       </tr>
       {% endfor %}
@@ -198,80 +444,153 @@
   </table>
 </div>
 
+<!-- AJAX Success Box -->
+<div id="ajaxMsgBox"
+     style="display:none; position: fixed; top: 10px; right: 10px; z-index: 9999;"
+     class="alert alert-success">
+</div>
+
 <script>
-function showMessage(msg) {
-  alert(msg); // or do something more fancy
+  // Make category/list data available in JS
+  window.categories = JSON.parse('{{ categories|tojson|safe }}');
+  window.lists_data = JSON.parse('{{ lists_data|tojson|safe }}');
+</script>
+
+<script>
+let toastTimer = null;
+function showToast(msg) {
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer=null; }
+  const msgBox = document.getElementById("ajaxMsgBox");
+  msgBox.innerText = msg;
+  msgBox.style.display = "block";
+  msgBox.classList.remove("alert-danger");
+  msgBox.classList.add("alert-success");
+  toastTimer = setTimeout(() => {
+    msgBox.style.display = "none";
+    toastTimer=null;
+  },3000);
 }
 
-/** Assign category (already in your code) */
-function assignCategoryAjax(trxIndex, catId, catName, catColor) {
-  const payload = { trx_index: trxIndex, cat_id: catId };
+// CSV Overlay open/close
+function openCsvOverlay(){ document.getElementById("csvOverlay").style.display="flex"; }
+function closeCsvOverlay(){ document.getElementById("csvOverlay").style.display="none"; }
+
+// JSON Overlay open/close
+function openJsonOverlay(){ document.getElementById("jsonOverlay").style.display="flex"; }
+function closeJsonOverlay(){ document.getElementById("jsonOverlay").style.display="none"; }
+
+// AJAX parse CSV
+function parseCSV(fname){
+  fetch("{{ url_for('ajax_parse_csv') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ filename: fname })
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status==="ok"){
+      showToast(resp.message);
+    } else {
+      showToast("Error: "+resp.message);
+    }
+  })
+  .catch(err=>showToast("AJAX error: "+err));
+}
+
+// AJAX delete CSV
+function deleteCSV(fname){
+  fetch("{{ url_for('ajax_delete_csv') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ filename: fname })
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status==="ok"){
+      showToast(resp.message);
+      // Remove the item from the list
+      const itemId = "csvItem"+fname.replace(/\./g,"_");
+      const li = document.getElementById(itemId);
+      if(li) li.remove();
+    } else {
+      showToast("Error: "+resp.message);
+    }
+  })
+  .catch(err=>showToast("AJAX error: "+err));
+}
+
+// Category & list assignment existing code (unchanged)...
+
+function openAssignOverlay(trxIndex, trxText){
+  const overlay = document.getElementById("assignOverlay"+trxIndex);
+  if(overlay) overlay.style.display="flex";
+}
+function closeAssignOverlay(trxIndex){
+  const overlay = document.getElementById("assignOverlay"+trxIndex);
+  if(overlay) overlay.style.display="none";
+}
+
+function assignCategoryAjax(trxIndex, catId, catName, catColor){
   fetch("{{ url_for('ajax_assign_category') }}", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  })
-  .then(r => r.json())
-  .then(resp => {
-    if(resp.status === "ok") {
-      showMessage(resp.message);
-      const catLabel = document.getElementById("catLabel" + trxIndex);
-      if(catLabel) {
-        catLabel.innerText = catName;
-        catLabel.style.backgroundColor = catColor;
-      }
-    } else {
-      showMessage("Error: " + resp.message);
-    }
-  })
-  .catch(err => {
-    showMessage("AJAX error: " + err);
-  });
-}
-
-/** Unassign category => sets transaction's category to None/UNK */
-function unassignCategoryAjax(trxIndex) {
-  const payload = { trx_index: trxIndex };
-  fetch("/ajax/unassign_category", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({ trx_index:trxIndex, cat_id:catId })
   })
   .then(r=>r.json())
   .then(resp=>{
     if(resp.status==="ok"){
-      showMessage(resp.message);
-      const catLabel = document.getElementById("catLabel"+trxIndex);
-      if(catLabel){
-        catLabel.innerText = "UNK";
-        catLabel.style.backgroundColor = "#dddddd";
+      showToast(resp.message);
+      const lbl = document.getElementById("catLabel"+trxIndex);
+      if(lbl){
+        lbl.innerText = catName;
+        lbl.style.backgroundColor = catColor;
       }
+      closeAssignOverlay(trxIndex);
     } else {
-      showMessage("Error: " + resp.message);
+      showToast("Error: "+resp.message);
     }
   })
-  .catch(err=> showMessage("AJAX error: " + err));
+  .catch(err=>showToast("AJAX error:"+err));
 }
 
-/** Add transaction to a list (already in your code) */
-function addToListAjax(trxIndex, listId, listName) {
-  const payload = { trx_index: trxIndex, list_id: listId };
+function unassignCategoryAjax(trxIndex){
+  fetch("{{ url_for('ajax_unassign_category') }}", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({ trx_index:trxIndex })
+  })
+  .then(r=>r.json())
+  .then(resp=>{
+    if(resp.status==="ok"){
+      showToast(resp.message);
+      const lbl = document.getElementById("catLabel"+trxIndex);
+      if(lbl){
+        lbl.innerText = "UNK";
+        lbl.style.backgroundColor="#dddddd";
+      }
+      closeAssignOverlay(trxIndex);
+    } else {
+      showToast("Error:"+resp.message);
+    }
+  })
+  .catch(err=>showToast("AJAX error:"+err));
+}
+
+function addToListAjax(trxIndex, listId, listName){
   fetch("/ajax/add_trx_to_list", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({ trx_index:trxIndex, list_id:listId })
   })
   .then(r=>r.json())
   .then(resp=>{
     if(resp.status==="ok"){
-      showMessage(resp.message);
+      showToast(resp.message);
       if(resp.added){
-        // create new badge in #listBadges if it isn't already there
         const badgesDiv = document.getElementById("listBadges"+trxIndex);
         if(badgesDiv){
-          // If not present, add it
           let existingBadge = document.getElementById(`listBadge${trxIndex}-${listId}`);
-          if(!existingBadge) {
+          if(!existingBadge){
             const span = document.createElement("span");
             span.className = "badge bg-secondary list-badge";
             span.id = `listBadge${trxIndex}-${listId}`;
@@ -281,37 +600,205 @@ function addToListAjax(trxIndex, listId, listName) {
         }
       }
     } else {
-      showMessage("Error: " + resp.message);
+      showToast("Error:"+resp.message);
     }
   })
-  .catch(err=> showMessage("AJAX error: " + err));
+  .catch(err=>showToast("AJAX error:"+err));
 }
 
-/** Remove transaction from a list => remove the badge from DOM */
-function removeFromListAjax(trxIndex, listId, listName) {
-  const payload = { trx_index: trxIndex, list_id: listId };
+function removeFromListAjax(trxIndex, listId, listName){
   fetch("/ajax/remove_trx_from_list", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({ trx_index:trxIndex, list_id:listId })
   })
   .then(r=>r.json())
   .then(resp=>{
     if(resp.status==="ok"){
-      showMessage(resp.message);
+      showToast(resp.message);
       if(resp.removed){
-        // remove the badge from DOM
         const badgeElem = document.getElementById(`listBadge${trxIndex}-${listId}`);
-        if(badgeElem) {
-          badgeElem.remove();
-        }
+        if(badgeElem) badgeElem.remove();
       }
     } else {
-      showMessage("Error: " + resp.message);
+      showToast("Error:"+resp.message);
     }
   })
-  .catch(err=> showMessage("AJAX error: " + err));
+  .catch(err=>showToast("AJAX error:"+err));
+}
+
+/** Searching + re-rendering code is unchanged... */
+function performSearch(){
+  const query = document.getElementById("searchInput").value.trim();
+  const sortVal = document.querySelector('select[name="sort"]').value;
+  fetch(`/ajax/search_transactions?q=${encodeURIComponent(query)}&sort=${encodeURIComponent(sortVal)}`)
+    .then(r=>r.json())
+    .then(resp=>{
+      if(resp.status==="ok"){
+        renderTransactions(resp.transactions);
+      } else {
+        console.error("Search error:",resp.message);
+      }
+    })
+    .catch(err=>console.error("AJAX error:",err));
+}
+
+function renderTransactions(tData){
+  const tbody = document.getElementById("transactionTbody");
+  if(!tbody) return;
+  tbody.innerHTML = "";
+
+  tData.forEach(item=>{
+    const tr=document.createElement("tr");
+
+    // hidden idx
+    const tdHidden=document.createElement("td");
+    tdHidden.style.display="none";
+    tdHidden.textContent=item.idx;
+    tr.appendChild(tdHidden);
+
+    // text col
+    const tdText=document.createElement("td");
+    tdText.className="text-col";
+
+    const tooltipDiv=document.createElement("div");
+    tooltipDiv.className="tooltip-text";
+
+    let full_text=item.buchungstext+" / "+item.umsatztext;
+    let truncated=full_text.length>100?full_text.slice(0,100)+"...":full_text;
+
+    const spanTrunc=document.createElement("span");
+    spanTrunc.className="truncated-text";
+    spanTrunc.title=full_text;
+    spanTrunc.textContent=truncated;
+
+    tooltipDiv.appendChild(spanTrunc);
+    tdText.appendChild(tooltipDiv);
+
+    tdText.appendChild(document.createElement("br"));
+    const smallPartner=document.createElement("small");
+    smallPartner.textContent=item.partner;
+    tdText.appendChild(smallPartner);
+
+    tr.appendChild(tdText);
+
+    // amount col
+    const tdAmount=document.createElement("td");
+    tdAmount.className="amount-col";
+    tdAmount.textContent=item.betrag.toFixed(2);
+    tr.appendChild(tdAmount);
+
+    // date-cat col
+    const tdDateCat=document.createElement("td");
+    tdDateCat.className="date-cat-assign-col";
+
+    let displayDate=item.buchungsdatum;
+    if(item.buchungsdatum && item.buchungsdatum.includes("-")){
+      let parts=item.buchungsdatum.split("-");
+      if(parts.length===3){
+        displayDate=parts[2]+"."+parts[1]+"."+parts[0];
+      }
+    }
+    const dateDiv=document.createElement("div");
+    dateDiv.textContent=displayDate;
+    tdDateCat.appendChild(dateDiv);
+
+    // cat label
+    const catDiv=document.createElement("div");
+    catDiv.id="catLabel"+item.idx;
+    catDiv.className="category-label";
+    catDiv.style.backgroundColor=item.cat_color;
+    catDiv.textContent=item.cat_name;
+    tdDateCat.appendChild(catDiv);
+
+    // list badges
+    const badgesDiv=document.createElement("div");
+    badgesDiv.className="mt-1";
+    badgesDiv.id="listBadges"+item.idx;
+    tdDateCat.appendChild(badgesDiv);
+
+    // "Assign" button
+    const assignBtn=document.createElement("button");
+    assignBtn.className="btn btn-sm assign-button mt-1";
+    assignBtn.type="button";
+    assignBtn.textContent="Assign";
+    assignBtn.onclick=()=>openAssignOverlay(item.idx,item.buchungstext);
+    tdDateCat.appendChild(assignBtn);
+
+    // overlay
+    const overlayDiv=document.createElement("div");
+    overlayDiv.id="assignOverlay"+item.idx;
+    overlayDiv.className="mobile-overlay";
+    // the same overlay content as server side...
+    overlayDiv.innerHTML=`
+      <div class="overlay-content">
+        <div class="overlay-header">
+          Assign Transaction #${item.idx}
+          <button class="close-overlay-btn" onclick="closeAssignOverlay(${item.idx})">×</button>
+        </div>
+        <div class="p-3">
+          <p><strong>Transaction ID:</strong> ${item.idx}</p>
+          <p><strong>Text:</strong> ${item.buchungstext} / ${item.umsatztext}</p>
+          <p><strong>Partner:</strong> ${item.partner}</p>
+          <p><strong>Amount:</strong> ${item.betrag.toFixed(2)} €</p>
+          <p><strong>Date:</strong> ${displayDate}</p>
+          <hr>
+          <div class="mb-3">
+            <label><strong>Assign Category:</strong></label>
+            <div class="d-flex flex-wrap mt-1" style="gap:4px;">
+              ${
+                window.categories.map(cat=>`
+                  <button class="btn btn-sm category-button overlay-category-button"
+                          type="button"
+                          style="background-color:${cat.color};"
+                          onclick="assignCategoryAjax(${item.idx},${cat.id},'${cat.name.replace(/'/g,"\\'")}','${cat.color.replace(/'/g,"\\'")}')">
+                    ${cat.name}
+                  </button>
+                `).join("")
+              }
+              <button class="btn btn-sm btn-danger mt-1"
+                      type="button"
+                      onclick="unassignCategoryAjax(${item.idx})">
+                Unassign
+              </button>
+            </div>
+          </div>
+          <hr>
+          <div class="mb-3">
+            <label><strong>Assign to Lists:</strong></label>
+            <div class="d-flex flex-wrap mt-1" style="gap:4px;">
+              ${
+                window.lists_data.map(lst=>`
+                  <div>
+                    <button class="btn btn-sm btn-outline-dark mb-1"
+                            type="button"
+                            onclick="addToListAjax(${item.idx},${lst.id},'${lst.name.replace(/'/g,"\\'")}')">
+                      +${lst.name}
+                    </button>
+                    <button class="btn btn-sm btn-danger mb-1"
+                            type="button"
+                            onclick="removeFromListAjax(${item.idx},${lst.id},'${lst.name.replace(/'/g,"\\'")}')">
+                      -${lst.name}
+                    </button>
+                  </div>
+                `).join("")
+              }
+            </div>
+          </div>
+          <hr>
+          <div class="text-center">
+            <button class="btn btn-sm btn-catAction" type="button" onclick="closeAssignOverlay(${item.idx})">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    tdDateCat.appendChild(overlayDiv);
+
+    tr.appendChild(tdDateCat);
+    tbody.appendChild(tr);
+  });
 }
 </script>
-
 {% endblock %}

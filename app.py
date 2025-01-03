@@ -1,11 +1,11 @@
-# app.py
-
 import os
 import io
 import csv
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+import random
+import tempfile  # new import
 
 from flask import (
     Flask,
@@ -16,9 +16,16 @@ from flask import (
     send_file,
     flash,
     make_response,
-    jsonify
+    jsonify,
+    session
 )
 from werkzeug.utils import secure_filename
+
+# For .env loading
+from dotenv import load_dotenv
+
+# For Twilio
+from twilio.rest import Client
 
 # For static PNG charts
 import matplotlib
@@ -30,38 +37,76 @@ import pandas as pd
 import plotly.express as px
 import plotly.io as pio
 
+load_dotenv()  # Load .env
+
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = 'SOME_LONG_SECRET_KEY'
 
+# ------------------ Twilio Setup ------------------
+TWILIO_PHONE = os.getenv("TWILIO_PHONE_NUMBER")
+TWILIO_SID   = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH  = os.getenv("TWILIO_AUTH_TOKEN")
+twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
+
+ALLOWED_PHONE_NUMBERS = {
+    "+43 670 359 66 14",
+    "+43 699 10503659"
+}
+
+# We'll store the "last code sent" in memory for demonstration.
+# In production, you'd store this in a DB or ephemeral store with expiration.
+# Format: { "<phone>": { "code": "123456", "timestamp": ... } }
+phone_code_map = {}
+
 # ------------------ In-Memory Data -----------------
 ALLOWED_EXTENSIONS = {'csv'}
 
 transactions = []  # Each: { <CSV fields>, 'DetectedCategoryId': int or None }
-categories = []    # { 'id', 'name', 'color', 'rules': [...], 'group_id': int|None, 'show_up_as_group': bool }
-groups = []        # { 'id', 'name', 'color' }
-lists_data = []    # { 'id', 'name', 'color', 'refund_list': bool, 'transaction_ids': [...], 'list_as_cat': bool? }
+categories = []
+groups = []
+lists_data = []
 
 next_category_id = 1
 next_group_id = 1
 next_list_id = 1
 
-# ---------------------------------------------------
-#                    Helpers
-# ---------------------------------------------------
+active_json_file = None
+
+# Optional: track parse status for each CSV
+parsed_csv_files = {}
+
+UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# ------------------ Utility Functions -----------------
+
+def reclassify_all_transactions_in_memory():
+    for trx in transactions:
+        cid = classify_transaction(trx)
+        trx['DetectedCategoryId'] = cid
+
+def classify_transaction(trx):
+    text = (
+        (trx.get('Buchungstext','') + ' ' +
+         trx.get('Umsatztext','') + ' ' +
+         trx.get('Name des Partners','') + ' ' +
+         trx.get('Verwendungszweck','')).lower()
+    )
+    for cat in categories:
+        for rule in cat['rules']:
+            if rule.lower() in text:
+                logger.debug(f"Transaction matched category {cat['name']} by rule '{rule}'")
+                return cat['id']
+    return None
 
 def allowed_file(filename):
     logger.debug(f"Checking file extension for: {filename}")
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def build_transaction_key(trx):
-    """
-    Return a dict that uniquely identifies a transaction
-    by (Buchungsdatum, Buchungstext, Betrag).
-    You can expand this if needed (e.g. Umsatztext, Name des Partners).
-    """
     return {
         'Buchungsdatum': trx.get('Buchungsdatum', ''),
         'Buchungstext':  trx.get('Buchungstext', ''),
@@ -69,24 +114,18 @@ def build_transaction_key(trx):
     }
 
 def find_trx_index_by_key(key_dict):
-    """
-    Look for a transaction in 'transactions' that matches
-    (Buchungsdatum, Buchungstext, Betrag) from 'key_dict'.
-    Return that transaction's index, or -1 if not found.
-    """
     for i, trx in enumerate(transactions):
-        # Compare date, text, amount (within a tolerance for floating)
-        if (trx.get('Buchungsdatum','') == key_dict.get('Buchungsdatum','') and
+        if (
+            trx.get('Buchungsdatum','') == key_dict.get('Buchungsdatum','') and
             trx.get('Buchungstext','')  == key_dict.get('Buchungstext','')  and
-            abs(trx.get('Betrag', 0.0) - key_dict.get('Betrag', 0.0)) < 1e-9):
+            abs(trx.get('Betrag', 0.0) - key_dict.get('Betrag', 0.0)) < 1e-9
+        ):
             return i
     return -1
 
-def parse_csv_and_store(file_stream):
-    logger.debug("Parsing CSV file stream...")
+def parse_csv_and_store(file_stream, filename=""):
+    logger.debug(f"Parsing CSV file stream for: {filename}")
     raw_data = file_stream.read()
-
-    # Attempt decode as UTF-8, else fallback to latin-1
     try:
         content_decoded = raw_data.decode('utf-8')
         logger.debug("Decoded as UTF-8.")
@@ -97,6 +136,7 @@ def parse_csv_and_store(file_stream):
     reader = csv.reader(io.StringIO(content_decoded), delimiter=';')
     headers = None
 
+    row_count = 0
     for idx, row in enumerate(reader):
         if not row or all(not cell.strip() for cell in row):
             continue
@@ -109,7 +149,6 @@ def parse_csv_and_store(file_stream):
         for h_i, header in enumerate(headers):
             row_data[header] = row[h_i] if h_i < len(row) else ''
 
-        # Convert amount
         if 'Betrag' in row_data:
             val = row_data['Betrag'].replace('\t','').replace(',','.')
             try:
@@ -117,24 +156,11 @@ def parse_csv_and_store(file_stream):
             except:
                 row_data['Betrag'] = 0.0
 
-        # Auto-classify
         row_data['DetectedCategoryId'] = classify_transaction(row_data)
         transactions.append(row_data)
-        logger.debug(f"Stored transaction row {idx}: {row_data}")
+        row_count += 1
 
-def classify_transaction(trx):
-    text = (
-        (trx.get('Buchungstext','') + ' ' +
-         trx.get('Umsatztext','') + ' ' +
-         trx.get('Name des Partners','') + ' ' +
-         trx.get('Verwendungszweck','')).lower()
-    )
-    for cat in categories:
-        for rule in cat['rules']:
-            if rule.lower() in text:
-                logger.debug(f"Transaction matched category {cat['name']} by rule {rule}")
-                return cat['id']
-    return None
+    logger.debug(f"Finished parsing {filename}. Stored {row_count} rows.")
 
 def get_category_by_id(cat_id):
     for c in categories:
@@ -159,32 +185,18 @@ def is_expense(trx):
     return (amt < 0)
 
 def compute_refund_status(trx_index):
-    """
-    Return True if transaction index is in any list with 'refund_list'=True
-    """
     for lst in lists_data:
         if lst.get('refund_list') and (trx_index in lst['transaction_ids']):
             return True
     return False
 
 def is_in_any_list(trx_index):
-    """
-    Returns True if the given transaction index is in any list (not just refund lists).
-    """
     for lst in lists_data:
         if trx_index in lst['transaction_ids']:
             return True
     return False
 
 def get_trx_amounts_for_category(cat_id):
-    """
-    Sums the negative amounts for a category, excluding any transaction that is in a list.
-    Also sums how much is in lists specifically for that category,
-    so we can show e.g. "Total excluding lists: X" and "List items: Y".
-
-    Return tuple: (total_overall, refundable, after_refund,
-                   total_excluding_lists, total_list_items)
-    """
     total_overall = 0.0
     total_excluding_lists = 0.0
     total_list_items = 0.0
@@ -225,55 +237,122 @@ def compute_global_income():
             total_inc += trx['Betrag']
     return total_inc
 
-# ------------------- AJAX Reassign Category Endpoint -------------------
-@app.route('/ajax/assign_category', methods=['POST'])
-def ajax_assign_category():
-    data = request.get_json()
-    if not data:
-        return jsonify({"status":"error","message":"No JSON data provided"}), 400
-    
-    trx_index = data.get("trx_index")
-    cat_id = data.get("cat_id")
-    logger.debug(f"AJAX assign_category: trx_index={trx_index}, cat_id={cat_id}")
+def list_files_in_uploads(extension=".csv"):
+    if not os.path.exists(UPLOAD_FOLDER):
+        return []
+    all_files = os.listdir(UPLOAD_FOLDER)
+    filtered = [f for f in all_files if f.lower().endswith(extension)]
+    return sorted(filtered)
 
-    if trx_index is None or cat_id is None:
-        return jsonify({"status":"error","message":"Missing 'trx_index' or 'cat_id'"}), 400
-    
-    if not (0 <= trx_index < len(transactions)):
-        return jsonify({"status":"error","message":"Invalid transaction index"}), 400
+def build_transactions_data():
+    results = []
+    for idx, trx in enumerate(transactions):
+        cat = get_category_by_id(trx.get('DetectedCategoryId'))
+        cat_name = cat['name'] if cat else "UNK"
+        cat_color = cat['color'] if cat else "#dddddd"
+        results.append({
+            "idx": idx,
+            "buchungstext": trx.get('Buchungstext',''),
+            "umsatztext": trx.get('Umsatztext',''),
+            "partner": trx.get('Name des Partners',''),
+            "betrag": trx.get('Betrag',0.0),
+            "buchungsdatum": trx.get('Buchungsdatum',''),
+            "cat_id": cat['id'] if cat else None,
+            "cat_name": cat_name,
+            "cat_color": cat_color
+        })
+    return results
 
-    transactions[trx_index]['DetectedCategoryId'] = cat_id
-    return jsonify({"status":"ok","message":"Transaction category updated"}), 200
+# ------------------- New: Protect all routes with @before_request ---------------
+@app.before_request
+def require_login():
+    # Let static files, login, verify, bar_chart_png, group_bar_chart_png pass:
+    if request.endpoint in (
+        "login", 
+        "verify", 
+        "static", 
+        "bar_chart_png",     # <<-- ALLOW
+        "group_bar_chart_png"  # <<-- ALLOW
+    ):
+        return
+    # If not logged in => redirect to /login
+    if not session.get("phone_verified"):
+        return redirect(url_for("login"))
 
-# ---------------------------------------------------
-#                   ROUTES
-# ---------------------------------------------------
+
+# ------------------- Routes for phone-based login ---------------
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        phone = request.form.get("phone", "").strip()
+        if phone in ALLOWED_PHONE_NUMBERS:
+            # Generate a random 6-digit code
+            code = f"{random.randint(100000,999999)}"
+            # Store it in phone_code_map
+            phone_code_map[phone] = {
+                "code": code,
+                "timestamp": datetime.now()
+            }
+            # Send SMS via Twilio
+            try:
+                twilio_client.messages.create(
+                    body=f"Your verification code is {code}",
+                    from_=TWILIO_PHONE,
+                    to=phone
+                )
+                # Store the phone in session temporarily
+                session["pending_phone"] = phone
+                flash("Verification code sent via SMS!", "success")
+                return redirect(url_for("verify"))
+            except Exception as e:
+                flash(f"Error sending SMS: {e}", "danger")
+                return redirect(url_for("login"))
+        else:
+            flash("Phone number not allowed.", "danger")
+            return redirect(url_for("login"))
+    return render_template("login.html")  # a simple form that asks for phone
+
+@app.route("/verify", methods=["GET", "POST"])
+def verify():
+    if request.method == "POST":
+        user_code = request.form.get("code", "").strip()
+        phone = session.get("pending_phone", "")
+        if not phone:
+            flash("No phone in session. Please re-login.", "danger")
+            return redirect(url_for("login"))
+
+        # Check code
+        entry = phone_code_map.get(phone, {})
+        if not entry:
+            flash("No code entry found. Please re-login.", "danger")
+            return redirect(url_for("login"))
+
+        if user_code == entry["code"]:
+            # Mark user as verified
+            session["phone_verified"] = phone
+            # Clear pending from session
+            session.pop("pending_phone", None)
+            flash("Phone verified! Welcome!", "success")
+            return redirect(url_for("index"))
+        else:
+            flash("Invalid code. Please try again.", "danger")
+            return redirect(url_for("verify"))
+
+    return render_template("verify.html")  # a simple form that asks for code
+
+
+# ------------------- Routes --------------------
 
 @app.route('/')
 def index():
     logger.debug("Serving home page.")
     return render_template('index.html')
 
-# ----------------- UPLOAD CSV -------------------
-@app.route('/upload', methods=['GET','POST'])
-def upload_files():
-    if request.method == 'POST':
-        files = request.files.getlist('files[]')
-        if not files:
-            flash("No files found in request", "danger")
-            return redirect(request.url)
-        for file in files:
-            if file.filename and allowed_file(file.filename):
-                parse_csv_and_store(file)
-                flash(f"File {file.filename} uploaded & parsed.", "success")
-            else:
-                flash(f"File {file.filename} not allowed or empty.", "danger")
-        return redirect(url_for('upload_files'))
-    return render_template('upload.html')
-
-# ----------------- TRANSACTIONS ------------------
 @app.route('/transactions')
 def view_transactions():
+    csv_files_on_disk = list_files_in_uploads(".csv")
+    json_files_on_disk = list_files_in_uploads(".json")
+
     sort_mode = request.args.get('sort','lowest')
 
     data = []
@@ -283,7 +362,7 @@ def view_transactions():
         cat_color = cat['color'] if cat else "#dddddd"
         data.append((trx, cat_name, cat_color, idx))
 
-    # Sort logic
+    # Sorting
     if sort_mode == 'lowest':
         data.sort(key=lambda x: x[0].get('Betrag',0.0))
     elif sort_mode == 'highest':
@@ -309,19 +388,95 @@ def view_transactions():
         'transactions.html',
         transactions_data=data,
         categories=categories,
-        lists_data=lists_data,  # fix: pass the lists
+        lists_data=lists_data,
         sort_mode=sort_mode,
         total=total_exp,
         refundable=ref_exp,
-        after_refund=after_exp
+        after_refund=after_exp,
+        uploaded_csv_files=csv_files_on_disk,
+        uploaded_json_files=json_files_on_disk,
+        active_json_file=active_json_file
     )
 
-@app.route('/transactions/classify_all', methods=['POST'])
-def classify_all_transactions():
-    for trx in transactions:
-        trx['DetectedCategoryId'] = classify_transaction(trx)
-    flash("All transactions re-classified according to updated rules.", 'success')
+@app.route('/transactions/upload_csv', methods=['POST'])
+def upload_csv_files():
+    files = request.files.getlist('csv_files[]')
+    parse_on_upload = request.form.get('parse_on_upload', '')
+
+    if not files:
+        flash("No CSV files found in request", "danger")
+        return redirect(url_for('view_transactions'))
+
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+    for file in files:
+        if not file.filename:
+            flash("One of the uploaded files has an empty filename.", "danger")
+            continue
+
+        if not allowed_file(file.filename):
+            flash(f"File {file.filename} not allowed (must be .csv).", "danger")
+            continue
+
+        filename = secure_filename(file.filename)
+        save_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.seek(0)
+        file.save(save_path)
+
+        if parse_on_upload:
+            file.stream.seek(0)
+            parse_csv_and_store(file.stream, filename)
+            parsed_csv_files[filename] = True
+            flash(f"CSV file '{filename}' uploaded & parsed.", "success")
+        else:
+            flash(f"CSV file '{filename}' uploaded (not parsed).", "success")
+
     return redirect(url_for('view_transactions'))
+
+@app.route('/ajax/csv/parse', methods=['POST'])
+def ajax_parse_csv():
+    data = request.get_json()
+    if not data:
+        return jsonify({"status":"error","message":"No JSON data"}), 400
+
+    fname = data.get("filename","")
+    if not fname:
+        return jsonify({"status":"error","message":"No filename provided"}),400
+
+    full_path = os.path.join(UPLOAD_FOLDER, fname)
+    if not os.path.exists(full_path):
+        return jsonify({"status":"error","message":"File not found on disk"}),404
+
+    with open(full_path, "rb") as f:
+        parse_csv_and_store(f, fname)
+    parsed_csv_files[fname] = True
+
+    updated_tx_data = build_transactions_data()
+    return jsonify({
+        "status":"ok",
+        "message":f"Parsed CSV file '{fname}'",
+        "transactions": updated_tx_data
+    })
+
+@app.route('/ajax/csv/delete', methods=['POST'])
+def ajax_delete_csv():
+    data = request.get_json()
+    if not data:
+        return jsonify({"status":"error","message":"No JSON data"}),400
+
+    fname = data.get("filename","")
+    if not fname:
+        return jsonify({"status":"error","message":"No filename provided"}),400
+
+    path = os.path.join(UPLOAD_FOLDER, fname)
+    if os.path.exists(path):
+        os.remove(path)
+        if fname in parsed_csv_files:
+            del parsed_csv_files[fname]
+        return jsonify({"status":"ok","message":f"CSV file '{fname}' deleted from server"}),200
+    else:
+        return jsonify({"status":"error","message":"File not found on disk"}),404
 
 @app.route('/transactions/assign/<int:trx_index>/<int:cat_id>', methods=['POST'])
 def assign_category(trx_index, cat_id):
@@ -330,12 +485,155 @@ def assign_category(trx_index, cat_id):
     flash("Transaction category updated.", 'success')
     return redirect(url_for('view_transactions'))
 
-# ----------------- CATEGORIES & GROUPS ------------------
+# --------------------- JSON Categories Handling ----------------------
+
+@app.route('/categories/upload_json', methods=['POST'])
+def upload_categories_json():
+    if 'json_file' not in request.files:
+        flash("No JSON file found in request", "danger")
+        return redirect(url_for('view_transactions'))
+
+    file = request.files['json_file']
+    if file.filename == '':
+        flash("No selected JSON file.", "danger")
+        return redirect(url_for('view_transactions'))
+
+    filename = secure_filename(file.filename)
+    if not filename.lower().endswith('.json'):
+        flash("Only .json files allowed", "danger")
+        return redirect(url_for('view_transactions'))
+
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+    save_path = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(save_path)
+
+    flash(f"JSON file '{filename}' uploaded. You can select it in the .json list overlay.", "success")
+    return redirect(url_for('view_transactions'))
+
+@app.route('/categories/select_json', methods=['POST'])
+def select_categories_json():
+    global categories, groups, lists_data
+    global next_category_id, next_group_id, next_list_id
+    global active_json_file
+
+    filename = request.form.get('filename','')
+    if not filename:
+        flash("No JSON filename provided", "danger")
+        return redirect(url_for('view_transactions'))
+
+    if active_json_file and active_json_file != filename:
+        flash("Cannot select a new JSON file until the current one is deselected.", "danger")
+        return redirect(url_for('view_transactions'))
+
+    try:
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        if not os.path.exists(filepath):
+            flash("File not found on disk.", "danger")
+            return redirect(url_for('view_transactions'))
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        categories = data.get("categories", [])
+        groups = data.get("groups", [])
+        lists_in = data.get("lists_data", [])
+        new_lists = []
+        for lst_obj in lists_in:
+            tk_arr = lst_obj.get('transaction_keys', [])
+            real_ids = []
+            for tkey in tk_arr:
+                i = find_trx_index_by_key(tkey)
+                if i >= 0:
+                    real_ids.append(i)
+            new_list = {
+                'id': lst_obj['id'],
+                'name': lst_obj['name'],
+                'color': lst_obj['color'],
+                'refund_list': lst_obj.get('refund_list', False),
+                'transaction_ids': real_ids,
+                'list_as_cat': lst_obj.get('list_as_cat', False)
+            }
+            new_lists.append(new_list)
+
+        lists_data = new_lists
+
+        if categories:
+            max_cat_id = max(c['id'] for c in categories if 'id' in c)
+            next_category_id = max_cat_id + 1
+        else:
+            next_category_id = 1
+
+        if groups:
+            max_group_id = max(g['id'] for g in groups if 'id' in g)
+            next_group_id = max_group_id + 1
+        else:
+            next_group_id = 1
+
+        if lists_data:
+            max_list_id = max(l['id'] for l in lists_data if 'id' in l)
+            next_list_id = max_list_id + 1
+        else:
+            next_list_id = 1
+
+        for trx in transactions:
+            cid = trx.get('DetectedCategoryId')
+            if not any(c['id'] == cid for c in categories):
+                trx['DetectedCategoryId'] = None
+
+        active_json_file = filename
+        reclassify_all_transactions_in_memory()
+        flash(f"Categories JSON '{filename}' is now active!", "success")
+
+    except Exception as e:
+        flash(f"Error selecting JSON: {e}", "danger")
+
+    return redirect(url_for('view_transactions'))
+
+@app.route('/categories/deselect_json', methods=['POST'])
+def deselect_categories_json():
+    global categories, groups, lists_data
+    global active_json_file
+    global next_category_id, next_group_id, next_list_id
+
+    categories = []
+    groups = []
+    lists_data = []
+    active_json_file = None
+    next_category_id = 1
+    next_group_id = 1
+    next_list_id = 1
+
+    for trx in transactions:
+        trx['DetectedCategoryId'] = None
+
+    flash("JSON file has been deselected. All categories, groups, and lists cleared.", "success")
+    return redirect(url_for('view_transactions'))
+
+# --------------------- Categories CRUD & Export/Import ----------------------
+
 @app.route('/categories')
 def manage_categories():
-    """
-    Merged with the 'lists' logic at the bottom (like you wanted).
-    """
+    cat_stats_map = {}
+    for c in categories:
+        cat_stats_map[c['id']] = [0.0, 0]
+
+    # We'll also compute total_exp so categories.html can show the percentage
+    total_exp, ref_exp, after_exp = compute_global_expenses()  # <--- new
+
+    for idx, trx in enumerate(transactions):
+        if is_expense(trx):
+            cid = trx.get('DetectedCategoryId')
+            if cid in cat_stats_map:
+                cat_stats_map[cid][0] += trx['Betrag']
+                cat_stats_map[cid][1] += 1
+
+    for c in categories:
+        s, ct = cat_stats_map.get(c['id'], [0.0, 0])
+        c['_sum'] = s
+        c['_count'] = ct
+
     group_map = {}
     for g in groups:
         group_map[g['id']] = {
@@ -351,11 +649,7 @@ def manage_categories():
         else:
             no_group_cats.append(c)
 
-    # Count how many are totally uncategorized
-    uncategorized_count = 0
-    for trx in transactions:
-        if trx.get('DetectedCategoryId') is None:
-            uncategorized_count += 1
+    uncategorized_count = sum(1 for trx in transactions if trx.get('DetectedCategoryId') is None)
 
     return render_template(
         'categories.html',
@@ -363,9 +657,11 @@ def manage_categories():
         no_group_cats=no_group_cats,
         uncategorized_count=uncategorized_count,
         groups=groups,
-        lists_data=lists_data,   # to show lists at the bottom
-        transactions=transactions
+        lists_data=lists_data,
+        transactions=transactions,
+        total_exp=total_exp   # <-- pass total_exp so we can compute % in categories.html
     )
+
 
 @app.route('/categories/create', methods=['POST'])
 def create_category():
@@ -379,12 +675,21 @@ def create_category():
         'color': color,
         'rules': [],
         'group_id': None,
-        'show_up_as_group': False
+        'show_up_as_group': False,
+        '_sum': 0.0,
+        '_count': 0
     }
     categories.append(cat)
     next_category_id += 1
-    flash(f"Category '{name}' created!", 'success')
-    return redirect(url_for('manage_categories'))
+
+    return jsonify({
+        "status": "ok",
+        "cat_id": cat['id'],
+        "cat_name": cat['name'],
+        "cat_color": cat['color'],
+        "cat_sum": cat['_sum'],
+        "cat_count": cat['_count']
+    })
 
 @app.route('/categories/view/<int:cat_id>')
 def view_category_transactions(cat_id):
@@ -398,11 +703,8 @@ def view_category_transactions(cat_id):
     data = []
     for idx, trx in enumerate(transactions):
         if trx.get('DetectedCategoryId') == cat_id:
-            cat_name = cat_obj['name'] if cat_obj else "UNK"
-            cat_color = cat_obj['color'] if cat_obj else "#dddddd"
-            data.append((trx, cat_name, cat_color, idx))
+            data.append((trx, cat_obj['name'], cat_obj['color'], idx))
 
-    # Sorting
     if sort_mode == 'lowest':
         data.sort(key=lambda x: x[0].get('Betrag',0.0))
     elif sort_mode == 'highest':
@@ -422,7 +724,6 @@ def view_category_transactions(cat_id):
                 return datetime.min
         data.sort(key=lambda x: parse_date(x[0].get('Buchungsdatum','')))
 
-    # Compute totals for just this category
     (total_overall,
      refundable_sum,
      after_refund,
@@ -443,7 +744,6 @@ def view_category_transactions(cat_id):
         lists_data=lists_data
     )
 
-# -------------- AJAX endpoints for categories --------------
 @app.route('/ajax/category/rename', methods=['POST'])
 def ajax_rename_category():
     cat_id = int(request.form.get('cat_id','0'))
@@ -500,8 +800,15 @@ def ajax_add_rule():
     cat = get_category_by_id(cat_id)
     if cat and rule:
         cat['rules'].append(rule)
-        return jsonify({"status":"ok","message":f"Rule '{rule}' added to category {cat_id}"})
-    return jsonify({"status":"error","message":"Category not found or invalid rule"})
+        reclassify_all_transactions_in_memory()
+        return jsonify({
+            "status":"ok",
+            "message":f"Rule '{rule}' added to category {cat_id}"
+        })
+    return jsonify({
+        "status":"error",
+        "message":"Category not found or invalid rule"
+    })
 
 @app.route('/ajax/category/remove_rule', methods=['POST'])
 def ajax_remove_rule():
@@ -509,8 +816,18 @@ def ajax_remove_rule():
     rule = request.form.get('rule_word','').strip()
     cat = get_category_by_id(cat_id)
     if cat:
-        cat['rules'] = [r for r in cat['rules'] if r != rule]
-        return jsonify({"status":"ok","message":f"Rule '{rule}' removed from category {cat_id}"})
+        if rule in cat['rules']:
+            cat['rules'].remove(rule)
+            reclassify_all_transactions_in_memory()
+            return jsonify({
+                "status":"ok",
+                "message":f"Rule '{rule}' removed from category {cat_id}"
+            })
+        else:
+            return jsonify({
+                "status":"error",
+                "message":f"Rule '{rule}' not found in category {cat_id}"
+            })
     return jsonify({"status":"error","message":"Category not found"})
 
 @app.route('/ajax/category/delete', methods=['POST'])
@@ -518,13 +835,13 @@ def ajax_delete_category():
     cat_id = int(request.form.get('cat_id','0'))
     global categories
     categories = [c for c in categories if c['id'] != cat_id]
-    # remove from transactions
     for trx in transactions:
         if trx.get('DetectedCategoryId') == cat_id:
             trx['DetectedCategoryId'] = None
     return jsonify({"status":"ok","message":f"Category {cat_id} deleted"})
 
 # ---------------- GROUPS ----------------
+
 @app.route('/groups/create', methods=['POST'])
 def create_group():
     global next_group_id
@@ -565,7 +882,6 @@ def ajax_delete_group():
     group_id = int(request.form.get('group_id','0'))
     global groups
     groups = [gg for gg in groups if gg['id'] != group_id]
-    # reset group_id for categories
     for c in categories:
         if c.get('group_id') == group_id:
             c['group_id'] = None
@@ -600,11 +916,6 @@ def view_group_transactions(group_id):
 
 @app.route('/lists')
 def manage_lists():
-    """
-    This route is needed so that url_for('manage_lists') works. 
-    'lists.html' is a dedicated page for managing lists, 
-    or you can unify it with categories, but here's a minimal example.
-    """
     return render_template('lists.html', lists_data=lists_data, transactions=transactions)
 
 @app.route('/lists/create', methods=['POST'])
@@ -613,7 +924,6 @@ def create_list():
     name = request.form.get('list_name','Untitled List').strip()
     color = request.form.get('list_color','#0000ff')
     is_refund = bool(request.form.get('refund_list',''))
-    # Optional: parse "list_as_cat" if you want to treat the list as a "category" in stats
     list_as_cat = bool(request.form.get('list_as_cat',''))
 
     new_list = {
@@ -673,7 +983,7 @@ def rename_list(list_id):
     if lobj:
         lobj['name'] = new_name
         flash(f"List renamed to '{new_name}'", "success")
-    return redirect(url_for('manage_categories'))
+    return "OK"
 
 @app.route('/lists/toggle_refund/<int:list_id>', methods=['POST'])
 def toggle_refund_list(list_id):
@@ -681,14 +991,14 @@ def toggle_refund_list(list_id):
     if lobj:
         lobj['refund_list'] = not lobj['refund_list']
         flash(f"List '{lobj['name']}' refund toggled -> {lobj['refund_list']}", "success")
-    return redirect(url_for('manage_categories'))
+    return "OK"
 
 @app.route('/lists/delete/<int:list_id>', methods=['POST'])
 def delete_list(list_id):
     global lists_data
     lists_data = [l for l in lists_data if l['id'] != list_id]
     flash("List deleted", "success")
-    return redirect(url_for('manage_categories'))
+    return "OK"
 
 @app.route('/lists/view/<int:list_id>')
 def view_list_transactions(list_id):
@@ -711,15 +1021,10 @@ def view_list_transactions(list_id):
                            items=items,
                            total=total_amt)
 
-# ------------------ Import / Export with transaction keys ------------------
+# ------------------ Import / Export (Existing) ------------------
 
 @app.route('/categories/export', methods=['GET'])
 def export_categories():
-    """
-    Export categories, groups, and lists_data, 
-    but lists_data uses 'transaction_keys' instead of raw indices.
-    """
-    # build a new structure for lists that replaces 'transaction_ids' with 'transaction_keys'
     def lists_to_json():
         result = []
         for lobj in lists_data:
@@ -727,7 +1032,6 @@ def export_categories():
             for idx in lobj['transaction_ids']:
                 if 0 <= idx < len(transactions):
                     trx = transactions[idx]
-                    # build a unique key for this transaction
                     keys_arr.append(build_transaction_key(trx))
             result.append({
                 'id': lobj['id'],
@@ -735,7 +1039,7 @@ def export_categories():
                 'color': lobj['color'],
                 'refund_list': lobj['refund_list'],
                 'list_as_cat': lobj.get('list_as_cat', False),
-                'transaction_keys': keys_arr  # store by keys, not indices
+                'transaction_keys': keys_arr
             })
         return result
 
@@ -751,11 +1055,6 @@ def export_categories():
 
 @app.route('/categories/import', methods=['POST'])
 def import_categories():
-    """
-    Import categories, groups, lists_data from JSON.
-    We'll restore lists' transaction memberships by matching transaction keys
-    to find the correct transaction index in 'transactions'.
-    """
     if 'categories_json' not in request.files:
         flash("No JSON file in request", "danger")
         return redirect(url_for('manage_categories'))
@@ -771,24 +1070,17 @@ def import_categories():
         global categories, groups, lists_data
         global next_category_id, next_group_id, next_list_id
 
-        # load categories, groups as normal
         categories = data.get("categories", [])
         groups = data.get("groups", [])
-
-        # the new lists data structure
         lists_in = data.get("lists_data", [])
-
-        # build new lists_data with real transaction_ids
         new_lists = []
         for lst_obj in lists_in:
-            # gather transaction_keys
             tk_arr = lst_obj.get('transaction_keys', [])
             real_ids = []
             for tkey in tk_arr:
                 i = find_trx_index_by_key(tkey)
                 if i >= 0:
                     real_ids.append(i)
-                # else skip if not found
             new_list = {
                 'id': lst_obj['id'],
                 'name': lst_obj['name'],
@@ -801,7 +1093,6 @@ def import_categories():
 
         lists_data = new_lists
 
-        # Recompute next IDs
         if categories:
             max_cat_id = max(c['id'] for c in categories if 'id' in c)
             next_category_id = max_cat_id + 1
@@ -820,13 +1111,14 @@ def import_categories():
         else:
             next_list_id = 1
 
-        # fix references for existing transactions' DetectedCategoryId if invalid
         for trx in transactions:
             cid = trx.get('DetectedCategoryId')
             if not any(c['id'] == cid for c in categories):
                 trx['DetectedCategoryId'] = None
 
         flash("Imported categories, groups, lists from JSON (with transaction_keys).", "success")
+        reclassify_all_transactions_in_memory()
+
     except Exception as e:
         logger.error(f"Error importing JSON: {e}")
         flash(f"Error importing JSON: {e}", "danger")
@@ -849,9 +1141,6 @@ def stats():
         cat_sums[c['id']] = 0.0
         cat_counts[c['id']] = 0
 
-    # For lists that want to act as categories, you could also do a separate pass.
-
-    # Accumulate negative amounts
     for idx, trx in enumerate(transactions):
         if is_expense(trx):
             cid = trx.get('DetectedCategoryId')
@@ -861,26 +1150,39 @@ def stats():
             cat_counts[cid] += 1
 
     data_list = []
+    # We'll also need total_exp for the percentage logic:
+    #   percentage = (cat_sums / total_exp)*100   if total_exp < 0
     for c in categories:
         cid = c['id']
+        amt = cat_sums[cid]
+        ct = cat_counts[cid]
+        pct = 0.0
+        if total_exp < 0.0:  # total_exp is negative
+            pct = (amt / total_exp) * 100.0  # negative / negative => positive %
         data_list.append({
             "cat_id": cid,
             "name": c['name'],
             "color": c['color'],
-            "amount": cat_sums[cid],
-            "count": cat_counts[cid]
+            "amount": amt,
+            "count": ct,
+            "pct": pct
         })
 
     if cat_counts[None] > 0:
+        amt_unassigned = cat_sums[None]
+        pct_unassigned = 0.0
+        if total_exp < 0.0:
+            pct_unassigned = (amt_unassigned / total_exp) * 100.0
         data_list.append({
             "cat_id": None,
             "name": "UNK",
             "color": "#dddddd",
-            "amount": cat_sums[None],
-            "count": cat_counts[None]
+            "amount": amt_unassigned,
+            "count": cat_counts[None],
+            "pct": pct_unassigned
         })
 
-    # sorting
+    # Sorting
     if sort_mode == 'highest':
         data_list.sort(key=lambda x: x['amount'], reverse=True)
     elif sort_mode == 'lowest':
@@ -901,29 +1203,42 @@ def stats():
         amt = cat_sums[c['id']]
         ct = cat_counts[c['id']]
         g_id = c.get('group_id')
-        if g_id in group_sums:
-            group_sums[g_id] += amt
-            group_counts[g_id] += ct
+        group_sums.setdefault(g_id, 0.0)
+        group_counts.setdefault(g_id, 0)
+        group_sums[g_id] += amt
+        group_counts[g_id] += ct
 
     group_data_list = []
     for g in groups:
+        amt_g = group_sums[g['id']]
+        ct_g = group_counts[g['id']]
+        pct_g = 0.0
+        if total_exp < 0.0:
+            pct_g = (amt_g / total_exp) * 100.0
         group_data_list.append({
             "group_id": g['id'],
             "name": g['name'],
             "color": g.get('color','#888888'),
-            "amount": group_sums[g['id']],
-            "count": group_counts[g['id']]
+            "amount": amt_g,
+            "count": ct_g,
+            "pct": pct_g
         })
 
     # categories that show_up_as_group
     for c in categories:
         if c.get('show_up_as_group'):
+            amt_c = cat_sums[c['id']]
+            ct_c = cat_counts[c['id']]
+            pct_c = 0.0
+            if total_exp < 0.0:
+                pct_c = (amt_c / total_exp) * 100.0
             group_data_list.append({
                 "group_id": -c['id'],
                 "name": f"[CatAsGroup] {c['name']}",
                 "color": c['color'],
-                "amount": cat_sums[c['id']],
-                "count": cat_counts[c['id']]
+                "amount": amt_c,
+                "count": ct_c,
+                "pct": pct_c
             })
 
     return render_template('stats.html',
@@ -970,12 +1285,13 @@ def bar_chart_png():
     for trx in transactions:
         if is_expense(trx):
             cid = trx.get('DetectedCategoryId')
-            cat_sums.setdefault(cid,0.0)
+            cat_sums.setdefault(cid, 0.0)
             cat_sums[cid] += trx['Betrag']
 
     cat_names = []
     sums = []
     colors = []
+
     for c in categories:
         cat_names.append(c['name'])
         sums.append(cat_sums[c['id']])
@@ -992,19 +1308,40 @@ def bar_chart_png():
         colors = ["#999999"]
 
     fig, ax = plt.subplots(figsize=(6,4))
-    ax.bar(cat_names, sums, color=colors)
+    bars = ax.bar(cat_names, sums, color=colors)
+
     ax.set_title("Total Negative Amount by Category (PNG)")
     ax.set_xlabel("Category")
     ax.set_ylabel("Amount")
     plt.xticks(rotation=45, ha='right')
+
+    # Label each bar with its value
+    for rect, val in zip(bars, sums):
+        height = rect.get_height()
+        if val >= 0:
+            ax.text(rect.get_x() + rect.get_width()/2, height, f"{val:.2f}",
+                    ha='center', va='bottom', fontsize=8)
+        else:
+            ax.text(rect.get_x() + rect.get_width()/2, height, f"{val:.2f}",
+                    ha='center', va='top', fontsize=8)
+
+    total_val = sum(sums)
+    ax.text(0.02, 0.98, f"Total: {total_val:.2f}",
+            transform=ax.transAxes, ha='left', va='top', fontsize=10, color='#000000')
+
     plt.tight_layout()
 
-    out = io.BytesIO()
-    plt.savefig(out, format='png')
+    # Instead of returning the in-memory stream directly,
+    # write it to a temp file:
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        plt.savefig(tmp.name, format='png')
+        tmp_path = tmp.name
     plt.close(fig)
-    out.seek(0)
-    return send_file(out, mimetype='image/png')
 
+    # Now serve that file via send_file:
+    return send_file(tmp_path, mimetype='image/png')
+
+# ...
 @app.route('/stats/group_bar_chart.png')
 def group_bar_chart_png():
     cat_sums = {}
@@ -1034,6 +1371,7 @@ def group_bar_chart_png():
     group_names = []
     group_vals = []
     color_list = []
+
     for g in groups:
         group_names.append(g['name'])
         group_vals.append(group_sums[g['id']])
@@ -1050,20 +1388,35 @@ def group_bar_chart_png():
         color_list = ["#999999"]
 
     fig, ax = plt.subplots(figsize=(6,4))
-    ax.bar(group_names, group_vals, color=color_list)
-    ax.set_title("Total Negative Amount by Group")
+    bars = ax.bar(group_names, group_vals, color=color_list)
+
+    ax.set_title("Total Negative Amount by Group (PNG)")
     ax.set_xlabel("Group")
     ax.set_ylabel("Amount")
     plt.xticks(rotation=45, ha='right')
+
+    for rect, val in zip(bars, group_vals):
+        height = rect.get_height()
+        if val >= 0:
+            ax.text(rect.get_x() + rect.get_width()/2, height, f"{val:.2f}",
+                    ha='center', va='bottom', fontsize=8)
+        else:
+            ax.text(rect.get_x() + rect.get_width()/2, height, f"{val:.2f}",
+                    ha='center', va='top', fontsize=8)
+
+    total_val = sum(group_vals)
+    ax.text(0.02, 0.98, f"Total: {total_val:.2f}",
+            transform=ax.transAxes, ha='left', va='top', fontsize=10, color='#000000')
+
     plt.tight_layout()
 
-    out = io.BytesIO()
-    plt.savefig(out, format='png')
+    # Save to temp file:
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        plt.savefig(tmp.name, format='png')
+        tmp_path = tmp.name
     plt.close(fig)
-    out.seek(0)
-    return send_file(out, mimetype='image/png')
 
-# ---------------- Downloadable Chart Endpoints ----------------
+    return send_file(tmp_path, mimetype='image/png')
 
 @app.route('/stats/download_bar_chart')
 def download_bar_chart():
@@ -1179,22 +1532,13 @@ def download_group_chart():
         download_name='group_chart.png'
     )
 
-# ------------------ Unassigned (Same Layout as "transactions") ------------------
 @app.route('/categories/view/unassigned')
 def view_unassigned_transactions():
-    """
-    Show all transactions that have no DetectedCategoryId (cat_id=None),
-    but show them with the same layout (text, amount, date, assign dropdown).
-    """
-    # build data same as transactions.html
     data = []
     for idx, trx in enumerate(transactions):
         if trx.get('DetectedCategoryId') is None:
-            cat_name = "UNK"
-            cat_color = "#dddddd"
-            data.append((trx, cat_name, cat_color, idx))
+            data.append((trx, "UNK", "#dddddd", idx))
 
-    # compute totals for unassigned
     total = 0.0
     refundable = 0.0
     for idx, tup in enumerate(data):
@@ -1218,19 +1562,11 @@ def view_unassigned_transactions():
     )
 
 ##################################
-# AJAX endpoint to add to a list #
+# AJAX endpoints for adding/removing from a list
 ##################################
+
 @app.route('/ajax/add_trx_to_list', methods=['POST'])
 def ajax_add_trx_to_list():
-    """
-    Expects JSON like:
-    {
-      "trx_index": 5,
-      "list_id": 2
-    }
-    Returns JSON:
-    { "status": "ok", "message": "...", "added": true|false }
-    """
     data = request.get_json()
     if not data:
         return jsonify({"status":"error","message":"No JSON data"}), 400
@@ -1250,23 +1586,20 @@ def ajax_add_trx_to_list():
     if trx_index not in lobj['transaction_ids']:
         lobj['transaction_ids'].append(trx_index)
         logger.debug(f"Transaction {trx_index} added to list {lobj['name']}")
-        return jsonify({"status":"ok","message":f"Transaction {trx_index} added to list '{lobj['name']}'","added":True})
+        return jsonify({
+            "status":"ok",
+            "message":f"Transaction {trx_index} added to list '{lobj['name']}'",
+            "added":True
+        })
     else:
-        return jsonify({"status":"ok","message":f"Transaction {trx_index} already in list '{lobj['name']}'","added":False})
+        return jsonify({
+            "status":"ok",
+            "message":f"Transaction {trx_index} already in list '{lobj['name']}'",
+            "added":False
+        })
 
-
-#####################################
-# AJAX endpoint to unassign category
-#####################################
 @app.route('/ajax/unassign_category', methods=['POST'])
 def ajax_unassign_category():
-    """
-    Expects JSON like:
-    {
-      "trx_index": 7
-    }
-    Sets the transaction's DetectedCategoryId = None
-    """
     data = request.get_json()
     if not data:
         return jsonify({"status":"error","message":"No JSON data provided"}), 400
@@ -1278,26 +1611,36 @@ def ajax_unassign_category():
     if not (0 <= trx_index < len(transactions)):
         return jsonify({"status":"error","message":"Invalid transaction index"}), 400
 
-    # Unassign category
     transactions[trx_index]['DetectedCategoryId'] = None
-    return jsonify({"status":"ok","message":f"Transaction {trx_index} unassigned from any category"}), 200
+    return jsonify({
+        "status":"ok",
+        "message":f"Transaction {trx_index} unassigned from any category"
+    }), 200
 
+@app.route('/ajax/assign_category', methods=['POST'])
+def ajax_assign_category():
+    data = request.get_json()
+    trx_index = data.get('trx_index')
+    cat_id = data.get('cat_id')
+    
+    if trx_index is None or cat_id is None:
+        return jsonify({'status': 'error', 'message': 'Missing trx_index or cat_id'}), 400
+    
+    if not (0 <= trx_index < len(transactions)):
+        return jsonify({'status': 'error', 'message': 'Invalid transaction index'}), 400
+    
+    cat = get_category_by_id(cat_id)
+    if not cat:
+        return jsonify({'status': 'error', 'message': 'Category not found'}), 404
+    
+    transactions[trx_index]['DetectedCategoryId'] = cat_id
+    return jsonify({
+        'status': 'ok',
+        'message': f"Transaction {trx_index} assigned to category '{cat['name']}'"
+    }), 200
 
-##############################################
-# AJAX endpoint to remove a transaction from 
-# a particular list
-##############################################
 @app.route('/ajax/remove_trx_from_list', methods=['POST'])
 def ajax_remove_trx_from_list():
-    """
-    Expects JSON like:
-    {
-      "trx_index": 5,
-      "list_id": 2
-    }
-    Returns JSON:
-    { "status": "ok"|"error", "message": "...", "removed": true|false }
-    """
     data = request.get_json()
     if not data:
         return jsonify({"status":"error","message":"No JSON data"}), 400
@@ -1317,11 +1660,63 @@ def ajax_remove_trx_from_list():
     if trx_index in lobj['transaction_ids']:
         lobj['transaction_ids'].remove(trx_index)
         logger.debug(f"Transaction {trx_index} removed from list {lobj['name']}")
-        return jsonify({"status":"ok","message":f"Transaction {trx_index} removed from list '{lobj['name']}'","removed":True})
+        return jsonify({
+            "status":"ok",
+            "message":f"Transaction {trx_index} removed from list '{lobj['name']}'",
+            "removed":True
+        })
     else:
-        return jsonify({"status":"ok","message":f"Transaction {trx_index} not in list '{lobj['name']}'","removed":False})
+        return jsonify({
+            "status":"ok",
+            "message":f"Transaction {trx_index} not in list '{lobj['name']}'",
+            "removed":False
+        })
 
-     
+@app.route('/ajax/search_transactions', methods=['GET'])
+def ajax_search_transactions():
+    query = request.args.get('q','').lower()
+    sort_mode = request.args.get('sort','lowest')
+
+    filtered_data = []
+    for idx, trx in enumerate(transactions):
+        full_text = (trx.get('Buchungstext','') + " " + trx.get('Umsatztext','')).lower()
+        if query in full_text:
+            cat = get_category_by_id(trx.get('DetectedCategoryId'))
+            cat_name = cat['name'] if cat else "UNK"
+            cat_color = cat['color'] if cat else "#dddddd"
+            filtered_data.append({
+                "idx": idx,
+                "buchungstext": trx.get('Buchungstext',''),
+                "umsatztext": trx.get('Umsatztext',''),
+                "partner": trx.get('Name des Partners',''),
+                "betrag": trx.get('Betrag',0.0),
+                "buchungsdatum": trx.get('Buchungsdatum',''),
+                "cat_id": cat['id'] if cat else None,
+                "cat_name": cat_name,
+                "cat_color": cat_color
+            })
+
+    if sort_mode == 'lowest':
+        filtered_data.sort(key=lambda x: x['betrag'])
+    elif sort_mode == 'highest':
+        filtered_data.sort(key=lambda x: x['betrag'], reverse=True)
+    elif sort_mode == 'latest_date':
+        def parse_date(d):
+            try:
+                return datetime.strptime(d, "%Y-%m-%d")
+            except:
+                return datetime.min
+        filtered_data.sort(key=lambda x: parse_date(x['buchungsdatum']), reverse=True)
+    elif sort_mode == 'oldest_date':
+        def parse_date(d):
+            try:
+                return datetime.strptime(d, "%Y-%m-%d")
+            except:
+                return datetime.min
+        filtered_data.sort(key=lambda x: parse_date(x['buchungsdatum']))
+
+    return jsonify({"status":"ok","transactions": filtered_data})
+
 if __name__ == '__main__':
     logger.debug("Starting Flask app (debug=True) on port 4444.")
     app.run(debug=True, port=4444)

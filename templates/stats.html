@@ -1,15 +1,71 @@
-<!--templates/stats.html-->
 {% extends 'layout.html' %}
 {% block content %}
+
 <style>
-  /* Center only the table headings */
-  table thead th {
-    text-align: center !important;
+  /* Reuse some styles from categories.html, with adjustments for stats. */
+
+  /* The container for our "stat boxes" (similar to cat-box) */
+  .stat-box {
+    position: relative;
+    margin-bottom: 10px;
+    border: 1px solid #ddd;
+    display: flex;
+    align-items: center;
+    padding: 8px; /* We'll pad a bit to match categories' look */
   }
-  /* Make the "Total" column text centered and bold, but keep other columns left-aligned */
-  .amount-cell {
-    text-align: center;
+  .stat-color-strip {
+    position: absolute;
+    top: 0; 
+    left: 0; 
+    bottom: 0;
+    width: 5px;
+  }
+  .stat-content {
+    margin-left: 10px; /* to accommodate color strip */
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between; /* so the name is left, the bracketed stats are right */
+  }
+
+  .stat-stats {
     font-weight: bold;
+    color: black;
+    margin-left: 10px;
+    white-space: nowrap;
+  }
+
+  /* Category/Group/List name. Make it bold. */
+  .stat-label {
+    font-weight: bold;
+    margin-right: 10px;
+  }
+
+  /* The "Trx" button (same as categories.html => #003058 background). */
+  .trx-button {
+    background-color: #003058 !important;
+    color: #ffffff !important;
+    border-radius: 30px !important;
+    font-weight: bold !important;
+    border: none !important;
+    padding: 5px 14px;
+    margin-left: 10px; 
+  }
+
+  .btn-outline-secondary {
+    border-radius: 30px !important;
+    font-weight: bold !important;
+    margin-left: 6px;
+  }
+  .btn-sm.btn-info {
+    border-radius: 30px;
+    font-weight: bold;
+    margin-left: 6px;
+  }
+  .btn-warning, .btn-outline-warning {
+    border-radius: 30px !important;
+    font-weight: bold !important;
+    margin-left: 6px;
   }
 </style>
 
@@ -23,15 +79,23 @@
 
 <hr>
 <!-- Category chart (negative amounts only) -->
-<div class="mb-3">
-  <img src="{{ url_for('bar_chart_png') }}" alt="Category Chart" class="img-fluid mb-2">
+<div class="mb-3" style="display:none;">
+  <!-- 
+    Add a simple "cache-buster" param "?v={{ time }}" 
+    to reduce partial-image caching issues. 
+  -->
+  <img src="{{ url_for('bar_chart_png') }}?v={{ loop.index if loop else '' }}" 
+       alt="Category Chart" 
+       class="img-fluid mb-2">
   <!-- Download link for Category Chart -->
   <a href="{{ url_for('download_bar_chart') }}" class="btn btn-sm btn-outline-secondary">
     Download Category Chart
   </a>
 </div>
-
-<!-- "Sort by" form below the category chart -->
+<a href="{{ url_for('download_bar_chart') }}" class="btn btn-sm btn-outline-secondary">
+    Download Category Chart
+  </a>
+<!-- "Sort by" form -->
 <form method="GET" action="{{ url_for('stats') }}" class="mb-3">
   <label>Sort by:</label>
   <select name="sort" class="form-select d-inline-block" style="width:auto;">
@@ -43,128 +107,111 @@
   <button class="btn btn-sm btn-primary">Apply</button>
 </form>
 
-<!-- Category table -->
-<table class="table table-striped">
-  <thead>
-    <tr>
-      <th>Cat</th>
-      <th>Total</th>
-      <th>Trx#</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for cat_stat in category_stats %}
-    <tr>
-      <!-- Background color on the "Cat" column -->
-      <td style="background-color: {{ cat_stat.color }};">
-        {{ cat_stat.name }}
-      </td>
-      <!-- Center + bold for total -->
-      <td class="amount-cell">
-        {{ "%.2f"|format(cat_stat.amount) }}
-      </td>
-      <td>
-        {{ cat_stat.count }}
-      </td>
-      <td>
-        {% if cat_stat.cat_id is none %}
+<!-- Categories (stat boxes) -->
+{% for cat_stat in category_stats %}
+<div class="stat-box">
+  <!-- Left color strip -->
+  <div class="stat-color-strip" style="background-color: {{ cat_stat.color }};"></div>
+
+  <div class="stat-content">
+    <!-- Left side: the category name -->
+    <div class="stat-label">
+      {{ cat_stat.name }}
+    </div>
+    <!-- Right side: bracketed stats + "Trx"/"View Unassigned" button -->
+    <div style="text-align: right;">
+      <!-- Add the bracket with the amount, percent, and transaction count -->
+      <span class="stat-stats">
+        [ {{ "%.2f"|format(cat_stat.amount) }} | {{ "%.2f"|format(cat_stat.pct) }}% | Trx# {{ cat_stat.count }} ]
+      </span>
+      {% if cat_stat.cat_id is none %}
         <!-- Special button for unassigned category -->
-        <a href="{{ url_for('view_unassigned_transactions') }}" class="btn btn-sm btn-warning">
-          View Unassigned
+        <a href="{{ url_for('view_unassigned_transactions') }}" class="btn btn-sm trx-button">
+          Unassigned Trx
         </a>
-        {% else %}
+      {% else %}
         <!-- Normal assigned category -->
-        <a href="{{ url_for('view_category_transactions', cat_id=cat_stat.cat_id) }}" class="btn btn-sm btn-info">
-          View Transactions
+        <a href="{{ url_for('view_category_transactions', cat_id=cat_stat.cat_id) }}" class="btn btn-sm trx-button">
+          Trx
         </a>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endfor %}
 
 <hr>
 <!-- Group chart (negative amounts only) -->
-<div class="mb-3">
-  <img src="{{ url_for('group_bar_chart_png') }}" alt="Group Chart" class="img-fluid mb-2">
+<div class="mb-3" style="display:none;">
+  <img src="{{ url_for('group_bar_chart_png') }}?v={{ loop.index if loop else '' }}" 
+       alt="Group Chart" 
+       class="img-fluid mb-2">
   <!-- Download link for Group Chart -->
   <a href="{{ url_for('download_group_chart') }}" class="btn btn-sm btn-outline-secondary">
     Download Group Chart
   </a>
 </div>
+<a href="{{ url_for('download_group_chart') }}" class="btn btn-sm btn-outline-secondary">
+    Download Group Chart
+  </a>
+<!-- Groups (stat boxes) -->
+{% for g in group_stats %}
+<div class="stat-box">
+  <div class="stat-color-strip" style="background-color: {{ g.color }};"></div>
 
-<!-- Group table -->
-<table class="table table-striped">
-  <thead>
-    <tr>
-      <th>Cat</th>
-      <th>Total</th>
-      <th>Trx#</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for g in group_stats %}
-    <tr>
-      <!-- Background color on the "Cat" column -->
-      <td style="background-color: {{ g.color }};">
-        {{ g.name }}
-      </td>
-      <!-- Center + bold for total -->
-      <td class="amount-cell">
-        {{ "%.2f"|format(g.amount) }}
-      </td>
-      <td>
-        {{ g.count }}
-      </td>
-      <td>
-        {% if g.group_id > 0 %}
-        <a href="{{ url_for('view_group_transactions', group_id=g.group_id) }}" class="btn btn-sm btn-info">
-          View Transactions
-        </a>
-        {% else %}
-        <span class="text-muted">[CatAsGroup, no direct group]</span>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+  <div class="stat-content">
+    <!-- Left side: group name -->
+    <div class="stat-label">
+      {{ g.name }}
+    </div>
+    <!-- Right side: bracketed stats + potential "Trx" link -->
+    <div style="text-align: right;">
+      <span class="stat-stats">
+        [ {{ "%.2f"|format(g.amount) }} | {{ "%.2f"|format(g.pct) }}% | Trx# {{ g.count }} ]
+      </span>
+      {% if g.group_id > 0 %}
+      <a href="{{ url_for('view_group_transactions', group_id=g.group_id) }}" class="btn btn-sm trx-button">
+        Trx
+      </a>
+      {% else %}
+      <span class="text-muted">[CatAsGroup]</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endfor %}
 
 <hr>
 <h4>Lists</h4>
 {% if lists_data %}
-<table class="table table-striped">
-  <thead>
-    <tr>
-      <th>List</th>
-      <th>Color</th>
-      <th>Refund?</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for l in lists_data %}
-    <tr>
-      <td>{{ l['name'] }}</td>
-      <td style="background-color: {{ l['color'] }};">{{ l['color'] }}</td>
-      <td>{{ 'Yes' if l['refund_list'] else 'No' }}</td>
-      <td>
-        <a href="{{ url_for('view_list_transactions', list_id=l['id']) }}" class="btn btn-sm btn-info">
-          View
+  {% for l in lists_data %}
+  <div class="stat-box" id="listContainer{{ l['id'] }}">
+    <div class="stat-color-strip" style="background-color: {{ l['color'] }};"></div>
+
+    <div class="stat-content">
+      <!-- Left side: list name + color code + refund badge -->
+      <div class="stat-label">
+        {{ l['name'] }}
+        {% if l['refund_list'] %}
+          <span class="badge bg-warning ms-2">Refund</span>
+        {% endif %}
+        <small class="text-muted ms-2">{{ l['color'] }}</small>
+      </div>
+      <!-- Right side: just the "Trx" button -->
+      <div style="text-align: right;">
+        <a href="{{ url_for('view_list_transactions', list_id=l['id']) }}" class="btn btn-sm trx-button">
+          Trx
         </a>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
 {% else %}
-<p>No lists yet.</p>
+  <p>No lists yet.</p>
 {% endif %}
 
 <a href="{{ url_for('export_interactive_charts') }}" class="btn btn-secondary mt-3">
   Export Interactive Charts (HTML)
 </a>
+
 {% endblock %}

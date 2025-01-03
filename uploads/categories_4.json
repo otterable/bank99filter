@@ -1,0 +1,205 @@
+{
+  "categories": [
+    {
+      "id": 1,
+      "name": "Lebensmittel",
+      "color": "#4caf50",
+      "rules": [
+        "Albert",
+        "Interspar",
+        "Spar",
+        "Billa",
+        "Penny",
+        "LIDL",
+        "Tesco",
+        "Anker",
+        "TooGoodToGo"
+      ],
+      "group_id": null,
+      "show_up_as_group": true
+    },
+    {
+      "id": 2,
+      "name": "Hosting",
+      "color": "#212121",
+      "rules": [
+        "Digitalocean",
+        "IONOS"
+      ],
+      "group_id": 4
+    },
+    {
+      "id": 3,
+      "name": "Freelancer Expenses",
+      "color": "#564d4d",
+      "rules": [
+        "FREELANCER",
+        "UPWORK"
+      ],
+      "group_id": 4
+    },
+    {
+      "id": 5,
+      "name": "Amazon Bestellungen",
+      "color": "#ffa052",
+      "rules": [
+        "AMZN",
+        "Amazon"
+      ],
+      "group_id": null
+    },
+    {
+      "id": 6,
+      "name": "Revolut Money upload",
+      "color": "#988181",
+      "rules": [
+        "REVOLUT"
+      ],
+      "group_id": null,
+      "show_up_as_group": true
+    },
+    {
+      "id": 7,
+      "name": "Z\u00fcge",
+      "color": "#ffc2c2",
+      "rules": [
+        "CD.CZ",
+        "REGIOJET",
+        "OEBB"
+      ],
+      "group_id": 5
+    },
+    {
+      "id": 9,
+      "name": "Barabhebung",
+      "color": "#367425",
+      "rules": [
+        "BANKOMAT"
+      ],
+      "group_id": null,
+      "show_up_as_group": true
+    },
+    {
+      "id": 10,
+      "name": "Fernw\u00e4rme",
+      "color": "#fe0606",
+      "rules": [
+        "Fernwaerme"
+      ],
+      "group_id": 2
+    },
+    {
+      "id": 11,
+      "name": "Miete",
+      "color": "#fe2a2a",
+      "rules": [
+        "Wohnbauvereinigung"
+      ],
+      "group_id": 2
+    },
+    {
+      "id": 12,
+      "name": "Strom",
+      "color": "#ff5c5c",
+      "rules": [
+        "ENERGIE Vertrieb GmbH"
+      ],
+      "group_id": 2
+    },
+    {
+      "id": 13,
+      "name": "E-Scooter",
+      "color": "#00ffe1",
+      "rules": [
+        "Voi",
+        "Lime",
+        "Dott"
+      ],
+      "group_id": 5
+    },
+    {
+      "id": 14,
+      "name": "Nextbikem\u00e4\u00dfig",
+      "color": "#4dffe1",
+      "rules": [
+        "Nextbike",
+        "Rekola"
+      ],
+      "group_id": 5
+    },
+    {
+      "id": 16,
+      "name": "AI Abos",
+      "color": "#caff8a",
+      "rules": [
+        "ChatGPT",
+        "OpenAI",
+        "Midjourney"
+      ],
+      "group_id": 4,
+      "show_up_as_group": false
+    },
+    {
+      "id": 17,
+      "name": "Busse",
+      "color": "#ffe0e0",
+      "rules": [
+        "FLIX",
+        "FLIXBUS"
+      ],
+      "group_id": 5,
+      "show_up_as_group": false
+    },
+    {
+      "id": 18,
+      "name": "\u00d6ffi",
+      "color": "#ffa3a3",
+      "rules": [
+        "WRLINIEN"
+      ],
+      "group_id": 5,
+      "show_up_as_group": false
+    }
+  ],
+  "groups": [
+    {
+      "id": 2,
+      "name": "Wohnung",
+      "color": "#bdffeb"
+    },
+    {
+      "id": 4,
+      "name": "Otter Projekte",
+      "color": "#4249ff"
+    },
+    {
+      "id": 5,
+      "name": "Mobilit\u00e4t",
+      "color": "#da1010"
+    }
+  ],
+  "lists_data": [
+    {
+      "id": 1,
+      "name": "test",
+      "color": "#0000ff",
+      "refund_list": false,
+      "list_as_cat": false,
+      "transaction_keys": [
+        {
+          "Buchungsdatum": "2024-12-06",
+          "Buchungstext": "SEPA-Lastschrift",
+          "Betrag": -451.83
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "xd",
+      "color": "#0000ff",
+      "refund_list": false,
+      "list_as_cat": false,
+      "transaction_keys": []
+    }
+  ]
+}

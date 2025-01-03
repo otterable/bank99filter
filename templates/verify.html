@@ -1,0 +1,9 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Enter Verification Code</h2>
+<form method="POST">
+  <label for="code">6-Digit Code:</label>
+  <input type="text" id="code" name="code" class="form-control" placeholder="123456" required>
+  <button type="submit" class="btn btn-success mt-2">Verify</button>
+</form>
+{% endblock %}

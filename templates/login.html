@@ -1,0 +1,9 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h2>Login</h2>
+<form method="POST">
+  <label for="phone">Phone Number:</label>
+  <input type="text" id="phone" name="phone" class="form-control" placeholder="+43 670 359 66 14" required>
+  <button type="submit" class="btn btn-primary mt-2">Send SMS Code</button>
+</form>
+{% endblock %}

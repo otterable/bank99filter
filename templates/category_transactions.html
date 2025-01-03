@@ -1,38 +1,206 @@
-<!--templates/category_transactions.html-->
+<!-- templates/category_transactions.html -->
 {% extends 'layout.html' %}
 {% block content %}
 
 <style>
-  /* For the main text column */
+  /* Existing Styles... */
+
+  .table.table-striped.table-bordered.align-middle {
+    table-layout: fixed;
+    width: 100%;
+    margin: 0;
+  }
+  .table thead th {
+    text-align: center !important;
+  }
+  .table.table-striped.table-bordered.align-middle th,
+  .table.table-striped.table-bordered.align-middle td {
+    padding: 0.5rem !important;
+    vertical-align: top;
+  }
   .text-col {
+    width: 45%;
     word-wrap: break-word;
-    white-space: normal;
     overflow-wrap: break-word;
+    margin: 0 !important;
   }
-
-  /* For the date+cat+assign column (everything else) */
+  .amount-col {
+    width: 20%;
+    text-align: center;
+    white-space: nowrap;
+    margin: 0 !important;
+    font-weight: bold;
+  }
   .date-cat-assign-col {
+    width: 35%;
     word-wrap: break-word;
-    white-space: normal;
     overflow-wrap: break-word;
+    margin: 0 !important;
   }
-
   .assign-btn {
     margin: 0 !important;
+  }
+  .list-badge {
+    margin-right: 4px;
+  }
+
+  /* Category Label Styling */
+  .category-label {
+    display: inline-block;
+    padding: 4px 12px;
+    color: white;
+    font-weight: bold;
+    border-radius: 30px;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: default;
+  }
+
+  /* Assign Button Styling */
+  .assign-button {
+    background-color: #003056 !important;
+    color: #ffffff !important;
+    font-weight: bold !important;
+    border-radius: 30px !important;
+    border: none !important;
+    padding: 6px 16px;
+    cursor: pointer;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Tooltip Styling */
+  .tooltip-text {
+    position: relative;
+    display: inline-block;
+    cursor: pointer;
+  }
+
+  .tooltip-text .tooltip-content {
+    visibility: hidden;
+    width: 300px;
+    background-color: #333;
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 8px;
+    position: absolute;
+    z-index: 10000;
+    bottom: 125%; /* Position above the text */
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    word-wrap: break-word;
+  }
+
+  .tooltip-text:hover .tooltip-content {
+    visibility: visible;
+    opacity: 1;
+  }
+
+  /* Overlay Styles (Reusing existing styles from transactions.html) */
+  .mobile-overlay {
+    display: none; 
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent background */
+    z-index: 9999;
+    overflow-y: auto;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  .mobile-overlay .overlay-content {
+    background-color: #fff;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 500px;
+    padding: 20px;
+    position: relative;
+  }
+  
+  .overlay-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+  }
+  
+  .close-overlay-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+  }
+  
+  /* Button Styles */
+  .btn-catAction {
+    background-color: #003056 !important;
+    color: #ffffff !important;
+    border-radius: 30px !important;
+    font-weight: bold !important;
+    border: none !important;
+    padding: 6px 16px;
+    cursor: pointer;
+  }
+  .btn-delete {
+    background-color: #9a031e !important;
+    color: #ffffff !important;
+    border-radius: 30px !important;
+    font-weight: bold !important;
+    border: none !important;
+  }
+
+  /* Truncated Text Styling */
+  .truncated-text {
+    display: block; /* Changed from inline-block to block for better wrapping */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal; /* Changed from nowrap to normal to allow wrapping */
+    word-wrap: break-word; /* Ensures long words break to prevent overflow */
+  }
+
+  /* Category Button Styling inside Overlay */
+  .overlay .category-button {
+    background-color: #003056 !important; /* Ensure consistent background */
+    color: #ffffff !important;
+    font-weight: bold !important;
+    border-radius: 30px !important;
+    border: none !important;
+    padding: 6px 16px;
+    cursor: pointer;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Enhanced Assign Button inside Overlay */
+  .overlay .btn-danger {
+    border-radius: 30px !important;
+    font-weight: bold !important;
+    color: #ffffff !important;
   }
 </style>
 
 <h2>Category: {{ category.name }}</h2>
 
-<!-- Summaries (like transactions) -->
+<!-- Global expense stats -->
 <div class="mb-3">
-  <strong>Total expenses:</strong> {{ "%.2f"|format(total) }}<br>
-  <strong>Refundable expenses:</strong> {{ "%.2f"|format(refundable) }}<br>
+  <strong>Total expenses:</strong> {{ "%.2f"|format(total) }} €<br>
+  <strong>Refundable expenses:</strong> {{ "%.2f"|format(refundable) }} €<br>
   <strong>Total after refunds:</strong> {{ "%.2f"|format(after_refund) }}
 </div>
 
 <!-- Sorting form -->
-<form action="{{ url_for('view_category_transactions', cat_id=category.id) }}" method="GET" class="mb-3">
+<form action="{{ url_for('view_category_transactions', cat_id=category.id) }}" method="GET" class="mb-3" style="margin:0;padding:0;">
   <label>Sort by:</label>
   <select name="sort" class="form-select d-inline-block" style="width:auto;">
     <option value="lowest" {% if sort_mode=='lowest' %}selected{% endif %}>Lowest Amount</option>
@@ -43,14 +211,16 @@
   <button class="btn btn-sm btn-primary">Apply</button>
 </form>
 
-<div class="table-responsive">
+
+
+<div class="table-responsive" style="margin:0;padding:0;">
   <table class="table table-striped table-bordered align-middle">
     <thead>
       <tr>
         <!-- Hidden index for internal logic -->
         <th style="display:none;">#</th>
         <th class="text-col">Text</th>
-        <th>Amount</th>
+        <th class="amount-col">€</th>
         <th class="date-cat-assign-col">Data</th>
       </tr>
     </thead>
@@ -60,15 +230,22 @@
         <!-- Hidden index -->
         <td style="display:none;">{{ idx }}</td>
         
-        <!-- Text column -->
+        <!-- Text column with truncation -->
         <td class="text-col">
-          {{ trx['Buchungstext'] }} / {{ trx['Umsatztext'] }}
+          <div class="tooltip-text">
+            {% set full_text = trx['Buchungstext'] ~ ' / ' ~ trx['Umsatztext'] %}
+            <span class="truncated-text" title="{{ full_text }}">
+              {{ full_text[:100] }}{% if full_text | length > 100 %}...{% endif %}
+            </span>
+          </div>
           <br>
           <small>{{ trx['Name des Partners'] }}</small>
         </td>
 
-        <!-- Amount -->
-        <td>{{ "%.2f"|format(trx['Betrag']) }}</td>
+        <!-- Amount (centered & bold due to CSS) -->
+        <td class="amount-col">
+          {{ "%.2f"|format(trx['Betrag']) }}
+        </td>
 
         <!-- Combined date + category + assign -->
         <td class="date-cat-assign-col">
@@ -86,66 +263,529 @@
             {% endif %}
           </div>
 
-          <!-- 2) Category name -->
-          <div class="mt-1" style="background-color: {{ cat_color }}; padding: 2px 4px; display: inline-block;">
+          <!-- 2) Category name (with color background and styled) -->
+          <div id="catLabel{{ idx }}" class="category-label" style="background-color: {{ cat_color }};">
             {{ cat_name }}
           </div>
 
-          <!-- 3) Assign dropdown (AJAX approach) -->
-          <div class="dropdown mt-1">
-            <button class="btn btn-sm btn-outline-secondary dropdown-toggle assign-btn"
-                    type="button" data-bs-toggle="dropdown">
-              <span class="navbar-toggler-icon"></span>
-              Assign
-            </button>
-            <ul class="dropdown-menu p-2" style="min-width: 220px;">
-              <li class="mb-2">
-                <strong>Category:</strong>
-                <div class="d-flex flex-wrap mt-1" style="gap: 4px;">
-                  {% for cat_item in categories %}
-                  <button class="btn btn-sm btn-outline-dark"
-                          type="button"
-                          style="color: {{ cat_item['color'] }};"
-                          title="Assign {{ cat_item['name'] }}"
-                          onclick="reassignCategory({{ idx }}, {{ cat_item['id'] }})">
-                    {{ cat_item['name'] }}
-                  </button>
-                  {% endfor %}
-                </div>
-              </li>
-            </ul>
+          <!-- 2.1) Existing Lists (Badges) that include this transaction -->
+          <div class="mt-1" id="listBadges{{ idx }}">
+            {% for lst in lists_data %}
+              {% if idx in lst['transaction_ids'] %}
+              <span class="badge bg-secondary list-badge" id="listBadge{{ idx }}-{{ lst['id'] }}">
+                [L] {{ lst['name'] }}
+              </span>
+              {% endif %}
+            {% endfor %}
           </div>
+
+          <!-- 3) Assign Button to Open Overlay -->
+          <button class="btn btn-sm assign-button mt-1"
+                  type="button"
+                  onclick="openAssignOverlay({{ idx }}, '{{ trx['Buchungstext'] | escape }}')">
+            Assign
+          </button>
+
+          <!-- Assign Overlay -->
+          <div id="assignOverlay{{ idx }}" class="mobile-overlay">
+            <div class="overlay-content">
+              <div class="overlay-header">
+                Assign Transaction #{{ idx }}
+                <button class="close-overlay-btn" onclick="closeAssignOverlay({{ idx }})" aria-label="Close Overlay">
+                  ×
+                </button>
+              </div>
+              <div class="p-3">
+                <!-- Transaction Details -->
+                <p><strong>Transaction ID:</strong> {{ idx }}</p>
+                <p><strong>Text:</strong> {{ trx['Buchungstext'] }} / {{ trx['Umsatztext'] }}</p>
+                <p><strong>Partner:</strong> {{ trx['Name des Partners'] }}</p>
+                <p><strong>Amount:</strong> {{ "%.2f"|format(trx['Betrag']) }} €</p>
+                <p><strong>Date:</strong> 
+                  {% if trx['Buchungsdatum'] and '-' in trx['Buchungsdatum'] %}
+                    {% set parts = trx['Buchungsdatum'].split('-') %}
+                    {% if parts|length == 3 %}
+                      {{ parts[2] }}.{{ parts[1] }}.{{ parts[0] }}
+                    {% else %}
+                      {{ trx['Buchungsdatum'] }}
+                    {% endif %}
+                  {% else %}
+                    {{ trx['Buchungsdatum'] }}
+                  {% endif %}
+                </p>
+
+                <hr>
+
+                <!-- Assign Category -->
+                <div class="mb-3">
+                  <label><strong>Assign Category:</strong></label>
+                  <div class="d-flex flex-wrap mt-1" style="gap: 4px;">
+                    {% for cat in categories %}
+                    <button class="btn btn-sm category-button"
+                            type="button"
+                            style="background-color: {{ cat['color'] }};"
+                            onclick="assignCategoryAjax({{ idx }}, {{ cat['id'] }}, '{{ cat['name'] }}', '{{ cat['color'] }}')">
+                      {{ cat['name'] }}
+                    </button>
+                    {% endfor %}
+                    <!-- Unassign Category -->
+                    <button class="btn btn-sm btn-danger mt-1"
+                            type="button"
+                            onclick="unassignCategoryAjax({{ idx }})">
+                      Unassign
+                    </button>
+                  </div>
+                </div>
+
+                <hr>
+
+                <!-- Assign to Lists -->
+                <div class="mb-3">
+                  <label><strong>Assign to Lists:</strong></label>
+                  <div class="d-flex flex-wrap mt-1" style="gap: 4px;">
+                    {% for lst in lists_data %}
+                    <div>
+                      <!-- Add to List -->
+                      <button class="btn btn-sm btn-outline-dark mb-1"
+                              type="button"
+                              onclick="addToListAjax({{ idx }}, {{ lst['id'] }}, '{{ lst['name'] }}')">
+                        +{{ lst['name'] }}
+                      </button>
+                      <!-- Remove from List -->
+                      <button class="btn btn-sm btn-danger mb-1"
+                              type="button"
+                              onclick="removeFromListAjax({{ idx }}, {{ lst['id'] }}, '{{ lst['name'] }}')">
+                        -{{ lst['name'] }}
+                      </button>
+                    </div>
+                    {% endfor %}
+                  </div>
+                </div>
+
+                <hr>
+
+                <!-- Close Overlay Button -->
+                <div class="text-center">
+                  <button class="btn btn-sm btn-catAction" type="button" onclick="closeAssignOverlay({{ idx }})">
+                    Close
+                  </button>
+                </div>
+              </div> <!-- p-3 -->
+            </div> <!-- overlay-content -->
+          </div> <!-- mobile-overlay -->
         </td>
       </tr>
+	  
       {% endfor %}
     </tbody>
   </table>
+  <a href="{{ url_for('manage_categories') }}" class="btn btn-secondary mt-3">Back to Categories</a>
+
 </div>
 
-<!-- Optional: Link back to categories page -->
-<a href="{{ url_for('manage_categories') }}" class="btn btn-secondary mt-3">Back to Categories</a>
+<!-- AJAX Success Message Box -->
+<div id="ajaxMsgBox"
+     style="display:none; position: fixed; top: 10px; right: 10px; z-index: 9999;"
+     class="alert alert-success">
+</div>
 
-<!-- AJAX script to reassign transaction -->
+<!-- JS Overlays + AJAX -->
 <script>
-function reassignCategory(trxIndex, newCatId) {
-  if(!confirm("Reassign this transaction to the new category?")) return;
+let toastTimer = null;
+
+/** Show success message at top-right for 3s. */
+function showToast(msg) {
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  const msgBox = document.getElementById("ajaxMsgBox");
+  msgBox.innerText = msg;
+  msgBox.style.display = "block";
+  msgBox.classList.remove("alert-danger");
+  msgBox.classList.add("alert-success");
+
+  toastTimer = setTimeout(() => {
+    msgBox.style.display = "none";
+    toastTimer = null;
+  }, 3000);
+}
+
+/** Open Assign Overlay */
+function openAssignOverlay(trxIndex, trxText) {
+  const overlay = document.getElementById(`assignOverlay${trxIndex}`);
+  if (overlay) {
+    overlay.style.display = "flex"; // Use flex to center the overlay
+  }
+}
+
+/** Close Assign Overlay */
+function closeAssignOverlay(trxIndex) {
+  const overlay = document.getElementById(`assignOverlay${trxIndex}`);
+  if (overlay) {
+    overlay.style.display = "none";
+  }
+}
+
+/** Assign category */
+function assignCategoryAjax(trxIndex, catId, catName, catColor) {
+  const payload = { trx_index: trxIndex, cat_id: catId };
   fetch("{{ url_for('ajax_assign_category') }}", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ trx_index: trxIndex, cat_id: newCatId })
+    body: JSON.stringify(payload)
   })
-  .then(res => res.json())
-  .then(data => {
-    if(data.status === "ok") {
-      alert(data.message);
-      location.reload(); // refresh page to see updated category
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status === "ok") {
+      showToast(resp.message);
+      const catLabel = document.getElementById("catLabel" + trxIndex);
+      if(catLabel) {
+        catLabel.innerText = catName;
+        catLabel.style.backgroundColor = catColor;
+      }
+      closeAssignOverlay(trxIndex); // Close the overlay after successful assignment
     } else {
-      alert("Error: " + data.message);
+      showToast("Error: " + resp.message);
     }
   })
   .catch(err => {
-    alert("AJAX error: " + err);
+    showToast("AJAX error: " + err);
   });
+}
+
+/** Unassign category => sets transaction's category to None/UNK */
+function unassignCategoryAjax(trxIndex) {
+  const payload = { trx_index: trxIndex };
+  fetch("/ajax/unassign_category", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status === "ok") {
+      showToast(resp.message);
+      const catLabel = document.getElementById("catLabel" + trxIndex);
+      if(catLabel) {
+        catLabel.innerText = "UNK";
+        catLabel.style.backgroundColor = "#dddddd";
+      }
+      closeAssignOverlay(trxIndex); // Close the overlay after successful unassignment
+    } else {
+      showToast("Error: " + resp.message);
+    }
+  })
+  .catch(err => showToast("AJAX error: " + err));
+}
+
+/** Add transaction to a list */
+function addToListAjax(trxIndex, listId, listName) {
+  const payload = { trx_index: trxIndex, list_id: listId };
+  fetch("/ajax/add_trx_to_list", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status === "ok") {
+      showToast(resp.message);
+      if(resp.added){
+        // create new badge in #listBadges if it isn't already there
+        const badgesDiv = document.getElementById("listBadges" + trxIndex);
+        if(badgesDiv){
+          // If not present, add it
+          let existingBadge = document.getElementById(`listBadge${trxIndex}-${listId}`);
+          if(!existingBadge) {
+            const span = document.createElement("span");
+            span.className = "badge bg-secondary list-badge";
+            span.id = `listBadge${trxIndex}-${listId}`;
+            span.innerHTML = `[L] ${listName}`;
+            badgesDiv.appendChild(span);
+          }
+        }
+      }
+    } else {
+      showToast("Error: " + resp.message);
+    }
+  })
+  .catch(err => showToast("AJAX error: " + err));
+}
+
+/** Remove transaction from a list => remove the badge from DOM */
+function removeFromListAjax(trxIndex, listId, listName) {
+  const payload = { trx_index: trxIndex, list_id: listId };
+  fetch("/ajax/remove_trx_from_list", {
+    method:"POST",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify(payload)
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status === "ok") {
+      showToast(resp.message);
+      if(resp.removed){
+        // remove the badge from DOM
+        const badgeElem = document.getElementById(`listBadge${trxIndex}-${listId}`);
+        if(badgeElem) {
+          badgeElem.remove();
+        }
+      }
+    } else {
+      showToast("Error: " + resp.message);
+    }
+  })
+  .catch(err => showToast("AJAX error: " + err));
+}
+
+/* Overlays for cat, group, list */
+function openGroupOverlay(gid) {
+  document.getElementById("groupOverlay" + gid).style.display = "block";
+}
+function closeGroupOverlay(gid) {
+  document.getElementById("groupOverlay" + gid).style.display = "none";
+}
+function openListOverlay(lid) {
+  document.getElementById("listOverlay" + lid).style.display = "block";
+}
+function closeListOverlay(lid) {
+  document.getElementById("listOverlay" + lid).style.display = "none";
+}
+
+/* GROUP AJAX */
+function deleteGroup(gid) {
+  if(!confirm("Delete group " + gid + "?")) return;
+  fetch("{{ url_for('ajax_delete_group') }}", {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    body: "group_id=" + gid
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status == "ok"){
+      showToast(resp.message);
+      setTimeout(() => { location.reload(); }, 1000);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+function ajaxRenameGroup(gid) {
+  let newName = document.getElementById("gName" + gid).value;
+  fetch("{{ url_for('ajax_rename_group') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"group_id=" + gid + "&new_name=" + encodeURIComponent(newName)
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status == "ok"){
+      showToast(resp.message);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+function ajaxUpdateGroupColor(gid) {
+  let newColor = document.getElementById("gColor" + gid).value;
+  fetch("{{ url_for('ajax_update_group_color') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"group_id=" + gid + "&new_color=" + encodeURIComponent(newColor)
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status == "ok"){
+      showToast(resp.message);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+/* CATEGORY AJAX */
+function ajaxRenameCat(catId) {
+  let newName = document.getElementById("catName" + catId).value;
+  fetch("{{ url_for('ajax_rename_category') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body: "cat_id=" + catId + "&new_name=" + encodeURIComponent(newName)
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status == "ok"){
+      showToast(resp.message);
+      document.getElementById("catNameDisplay" + catId).innerText = resp.cat_name;
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+function ajaxUpdateCatColor(catId) {
+  let newColor = document.getElementById("catColor" + catId).value;
+  fetch("{{ url_for('ajax_update_category_color') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body: "cat_id=" + catId + "&new_color=" + encodeURIComponent(newColor)
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status == "ok"){
+      showToast(resp.message);
+      // Optionally, update category color in the UI
+      const catLabel = document.getElementById("catLabel" + catId);
+      if(catLabel){
+        catLabel.style.backgroundColor = newColor;
+      }
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+function ajaxToggleShowGroup(catId) {
+  fetch("{{ url_for('ajax_toggle_show_group') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"cat_id=" + catId
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status == "ok"){
+      showToast(resp.message);
+      // Optionally, update UI elements related to show_as_group
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+function ajaxAssignGroup(catId) {
+  let groupVal = document.getElementById("catGroup" + catId).value;
+  fetch("{{ url_for('ajax_assign_group') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"cat_id=" + catId + "&group_id=" + encodeURIComponent(groupVal)
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status == "ok"){
+      showToast(resp.message);
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+function ajaxAddRule(catId) {
+  let ruleWord = document.getElementById("ruleWord" + catId).value;
+  if(!ruleWord.trim()) {
+    alert("Rule word cannot be empty.");
+    return;
+  }
+  fetch("{{ url_for('ajax_add_rule') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"cat_id=" + catId + "&rule_word=" + encodeURIComponent(ruleWord)
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status == "ok"){
+      showToast(resp.message);
+      // Optionally, append the new rule badge to the UI
+      const rulesDiv = document.getElementById("catRules" + catId);
+      if(rulesDiv){
+        const newBadge = document.createElement("span");
+        newBadge.className = "badge rule-badge";
+        newBadge.innerHTML = `${ruleWord} <button class="btn-close btn-close-white ms-1" style="float:right;" onclick="ajaxRemoveRule(${catId}, '${ruleWord}')"></button>`;
+        rulesDiv.appendChild(newBadge);
+      }
+      // Clear input field
+      document.getElementById("ruleWord" + catId).value = "";
+    } else {
+      alert("Error: " + resp.message);
+    }
+  });
+}
+function ajaxRemoveRule(catId, rule) {
+  fetch("{{ url_for('ajax_remove_rule') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"cat_id=" + catId + "&rule_word=" + encodeURIComponent(rule)
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status == "ok"){
+      showToast(resp.message);
+      // Remove the rule badge from the UI
+      const badge = Array.from(document.querySelectorAll(`#catRules${catId} .rule-badge`)).find(b => b.textContent.includes(rule));
+      if(badge){
+        badge.remove();
+      }
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+function ajaxDeleteCategory(catId) {
+  if(!confirm("Delete category ID=" + catId + "?")) return;
+  fetch("{{ url_for('ajax_delete_category') }}", {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"cat_id=" + catId
+  })
+  .then(response => response.json())
+  .then(resp => {
+    if(resp.status == "ok"){
+      showToast(resp.message);
+      const cbox = document.getElementById("catContainer" + catId);
+      if(cbox) cbox.remove();
+    } else {
+      alert(resp.message);
+    }
+  });
+}
+
+/* LISTS AJAX */
+/* The existing AJAX functions for lists can remain unchanged or be updated to use JSON if preferred */
+function renameListAjax(listId) {
+  const newName = document.getElementById("listNewName" + listId).value;
+  if(!newName.trim()) {
+    alert("List name cannot be empty.");
+    return false;
+  }
+  fetch("{{ url_for('rename_list', list_id=0) }}".replace("0", listId), {
+    method:"POST",
+    headers: {"Content-Type":"application/x-www-form-urlencoded"},
+    body:"new_name=" + encodeURIComponent(newName)
+  })
+  .then(response => response.text())
+  .then(resp => {
+    showToast("List renamed to '" + newName + "'");
+  })
+  .catch(err => alert("Error: " + err));
+  return false;
+}
+function toggleRefundAjax(listId) {
+  fetch("{{ url_for('toggle_refund_list', list_id=0) }}".replace("0", listId), {
+    method:"POST"
+  })
+  .then(response => response.text())
+  .then(resp => {
+    showToast("Toggled refund for list #" + listId);
+  })
+  .catch(err => alert("Error: " + err));
+}
+function deleteListAjax(listId) {
+  if(!confirm("Delete list #" + listId + "?")) return;
+  fetch("{{ url_for('delete_list', list_id=0) }}".replace("0", listId), {
+    method:"POST"
+  })
+  .then(response => response.text())
+  .then(resp => {
+    showToast("List #" + listId + " deleted.");
+    const lbox = document.getElementById("listContainer" + listId);
+    if(lbox) lbox.remove();
+  })
+  .catch(err => alert("Error: " + err));
 }
 </script>
 
