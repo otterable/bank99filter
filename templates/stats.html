@@ -84,13 +84,13 @@
     Add a simple "cache-buster" param "?v={{ time }}" 
     to reduce partial-image caching issues. 
   -->
-  <img src="{{ url_for('bar_chart_png') }}?v={{ loop.index if loop else '' }}" 
-       alt="Category Chart" 
-       class="img-fluid mb-2">
-  <!-- Download link for Category Chart -->
-  <a href="{{ url_for('download_bar_chart') }}" class="btn btn-sm btn-outline-secondary">
-    Download Category Chart
-  </a>
+  <img src="{{ url_for('serve_chart_file', filename='bar_chart.png') }}"
+     alt="Category Chart" class="img-fluid mb-2">
+
+<a href="{{ url_for('serve_chart_file', filename='bar_chart.png') }}"
+   download="bar_chart.png" class="btn btn-sm btn-outline-secondary">
+  Download Category Chart
+</a>
 </div>
 <a href="{{ url_for('download_bar_chart') }}" class="btn btn-sm btn-outline-secondary">
     Download Category Chart
@@ -143,13 +143,13 @@
 <hr>
 <!-- Group chart (negative amounts only) -->
 <div class="mb-3" style="display:none;">
-  <img src="{{ url_for('group_bar_chart_png') }}?v={{ loop.index if loop else '' }}" 
-       alt="Group Chart" 
-       class="img-fluid mb-2">
-  <!-- Download link for Group Chart -->
-  <a href="{{ url_for('download_group_chart') }}" class="btn btn-sm btn-outline-secondary">
-    Download Group Chart
-  </a>
+ <img src="{{ url_for('serve_chart_file', filename='group_chart.png') }}"
+     alt="Group Chart" class="img-fluid mb-2">
+
+<a href="{{ url_for('serve_chart_file', filename='group_chart.png') }}"
+   download="group_chart.png" class="btn btn-sm btn-outline-secondary">
+  Download Group Chart
+</a>
 </div>
 <a href="{{ url_for('download_group_chart') }}" class="btn btn-sm btn-outline-secondary">
     Download Group Chart

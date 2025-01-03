@@ -5,7 +5,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 import random
-import tempfile  # new import
+import tempfile
 
 from flask import (
     Flask,
@@ -14,6 +14,7 @@ from flask import (
     redirect,
     url_for,
     send_file,
+    send_from_directory,   # <--- we’ll use this to serve files
     flash,
     make_response,
     jsonify,
@@ -78,11 +79,16 @@ active_json_file = None
 # Optional: track parse status for each CSV
 parsed_csv_files = {}
 
+CHARTS_FOLDER = os.path.join(os.getcwd(), 'charts')  # e.g. "charts/"
+os.makedirs(CHARTS_FOLDER, exist_ok=True)
+
 UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ------------------ Utility Functions -----------------
 
+    
+    
 def reclassify_all_transactions_in_memory():
     for trx in transactions:
         cid = classify_transaction(trx)
@@ -263,7 +269,153 @@ def build_transactions_data():
         })
     return results
 
+
+@app.route('/charts/<filename>')
+def serve_chart_file(filename):
+    """
+    Serve a pre-rendered PNG from the /charts/ folder.
+    E.g. GET /charts/bar_chart.png or /charts/group_chart.png
+    """
+    return send_from_directory(CHARTS_FOLDER, filename)
+
+
 # ------------------- New: Protect all routes with @before_request ---------------
+@app.before_first_request
+def pre_render_charts():
+    """
+    This will run once (the first time the server receives any request).
+    We'll generate bar_chart.png and group_chart.png and store them in /charts/ folder.
+    """
+
+    # 1) Generate the 'bar_chart.png'
+    fig, ax = plt.subplots(figsize=(6,4))
+
+    cat_sums = {}
+    cat_sums[None] = 0.0
+    for c in categories:
+        cat_sums[c['id']] = 0.0
+
+    for trx in transactions:
+        if is_expense(trx):
+            cid = trx.get('DetectedCategoryId')
+            cat_sums.setdefault(cid, 0.0)
+            cat_sums[cid] += trx['Betrag']
+
+    cat_names = []
+    sums = []
+    colors = []
+    for c in categories:
+        cat_names.append(c['name'])
+        sums.append(cat_sums[c['id']])
+        colors.append(c['color'])
+
+    if cat_sums[None] != 0.0:
+        cat_names.append("UNK")
+        sums.append(cat_sums[None])
+        colors.append("#dddddd")
+
+    if len(cat_names) == 0:
+        cat_names = ["No data"]
+        sums = [0]
+        colors = ["#999999"]
+
+    bars = ax.bar(cat_names, sums, color=colors)
+    ax.set_title("Total Negative Amount by Category (PNG)")
+    ax.set_xlabel("Category")
+    ax.set_ylabel("Amount")
+    plt.xticks(rotation=45, ha='right')
+
+    # Label each bar
+    for rect, val in zip(bars, sums):
+        height = rect.get_height()
+        if val >= 0:
+            ax.text(rect.get_x() + rect.get_width()/2, height, f"{val:.2f}",
+                    ha='center', va='bottom', fontsize=8)
+        else:
+            ax.text(rect.get_x() + rect.get_width()/2, height, f"{val:.2f}",
+                    ha='center', va='top', fontsize=8)
+
+    total_val = sum(sums)
+    ax.text(0.02, 0.98, f"Total: {total_val:.2f}",
+            transform=ax.transAxes, ha='left', va='top', fontsize=10, color='#000000')
+
+    plt.tight_layout()
+    bar_chart_path = os.path.join(CHARTS_FOLDER, 'bar_chart.png')
+    plt.savefig(bar_chart_path, format='png')
+    plt.close(fig)
+
+    # 2) Generate the 'group_chart.png'
+    fig2, ax2 = plt.subplots(figsize=(6,4))
+
+    # (similar code from your group_bar_chart_png logic)
+    cat_sums = {}
+    for c in categories:
+        cat_sums[c['id']] = 0.0
+
+    for trx in transactions:
+        if is_expense(trx):
+            cid = trx.get('DetectedCategoryId')
+            cat_sums.setdefault(cid, 0.0)
+            cat_sums[cid] += trx['Betrag']
+
+    group_sums = {}
+    for g in groups:
+        group_sums[g['id']] = 0.0
+
+    for c in categories:
+        g_id = c.get('group_id')
+        group_sums.setdefault(g_id, 0.0)
+        group_sums[g_id] += cat_sums[c['id']]
+
+    show_as_group = []
+    for c in categories:
+        if c.get('show_up_as_group'):
+            show_as_group.append(("[CatAsGroup] "+c['name'], cat_sums[c['id']], c['color']))
+
+    group_names = []
+    group_vals = []
+    color_list = []
+    for g in groups:
+        group_names.append(g['name'])
+        group_vals.append(group_sums[g['id']])
+        color_list.append(g['color'])
+
+    for (lbl, val, col) in show_as_group:
+        group_names.append(lbl)
+        group_vals.append(val)
+        color_list.append(col)
+
+    if len(group_names) == 0:
+        group_names = ["No data"]
+        group_vals = [0]
+        color_list = ["#999999"]
+
+    bars2 = ax2.bar(group_names, group_vals, color=color_list)
+    ax2.set_title("Total Negative Amount by Group (PNG)")
+    ax2.set_xlabel("Group")
+    ax2.set_ylabel("Amount")
+    plt.xticks(rotation=45, ha='right')
+
+    for rect, val in zip(bars2, group_vals):
+        height = rect.get_height()
+        if val >= 0:
+            ax2.text(rect.get_x() + rect.get_width()/2, height, f"{val:.2f}",
+                     ha='center', va='bottom', fontsize=8)
+        else:
+            ax2.text(rect.get_x() + rect.get_width()/2, height, f"{val:.2f}",
+                     ha='center', va='top', fontsize=8)
+
+    total_val2 = sum(group_vals)
+    ax2.text(0.02, 0.98, f"Total: {total_val2:.2f}",
+             transform=ax2.transAxes, ha='left', va='top', fontsize=10, color='#000000')
+
+    plt.tight_layout()
+    group_chart_path = os.path.join(CHARTS_FOLDER, 'group_chart.png')
+    plt.savefig(group_chart_path, format='png')
+    plt.close(fig2)
+
+    logger.info("Pre-rendered bar_chart.png and group_chart.png in /charts/ folder.")
+    
 @app.before_request
 def require_login():
     # Let static files, login, verify, bar_chart_png, group_bar_chart_png pass:
