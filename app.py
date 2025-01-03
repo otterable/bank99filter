@@ -14,7 +14,7 @@ from flask import (
     redirect,
     url_for,
     send_file,
-    send_from_directory,   # <--- we’ll use this to serve files
+    send_from_directory,
     flash,
     make_response,
     jsonify,
@@ -30,7 +30,7 @@ from twilio.rest import Client
 
 # For static PNG charts
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use('Agg')  # Use 'Agg' backend for headless servers
 import matplotlib.pyplot as plt
 
 # For optional pandas/plotly
@@ -57,9 +57,6 @@ ALLOWED_PHONE_NUMBERS = {
     "+43 699 10503659"
 }
 
-# We'll store the "last code sent" in memory for demonstration.
-# In production, you'd store this in a DB or ephemeral store with expiration.
-# Format: { "<phone>": { "code": "123456", "timestamp": ... } }
 phone_code_map = {}
 
 # ------------------ In-Memory Data -----------------
@@ -75,20 +72,19 @@ next_group_id = 1
 next_list_id = 1
 
 active_json_file = None
-
-# Optional: track parse status for each CSV
 parsed_csv_files = {}
 
-CHARTS_FOLDER = os.path.join(os.getcwd(), 'charts')  # e.g. "charts/"
+CHARTS_FOLDER = os.path.join(os.getcwd(), 'charts')
 os.makedirs(CHARTS_FOLDER, exist_ok=True)
 
 UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ------------------ Utility Functions -----------------
 
-    
-    
+##################################################
+#                Utility Functions               #
+##################################################
+
 def reclassify_all_transactions_in_memory():
     for trx in transactions:
         cid = classify_transaction(trx)
@@ -120,23 +116,29 @@ def build_transaction_key(trx):
     }
 
 def find_trx_index_by_key(key_dict):
-    for i, trx in enumerate(transactions):
-        if (
-            trx.get('Buchungsdatum','') == key_dict.get('Buchungsdatum','') and
-            trx.get('Buchungstext','')  == key_dict.get('Buchungstext','')  and
-            abs(trx.get('Betrag', 0.0) - key_dict.get('Betrag', 0.0)) < 1e-9
-        ):
+    for i, t in enumerate(transactions):
+        if (t.get('Buchungsdatum','') == key_dict.get('Buchungsdatum','') and
+            t.get('Buchungstext','')  == key_dict.get('Buchungstext','') and
+            abs(t.get('Betrag', 0.0) - key_dict.get('Betrag', 0.0)) < 1e-9):
             return i
     return -1
 
+
 def parse_csv_and_store(file_stream, filename=""):
-    logger.debug(f"Parsing CSV file stream for: {filename}")
+    """
+    Clears the global `transactions` to avoid indefinite accumulation,
+    then parses the given CSV file_stream into memory.
+    """
+    global transactions
+    transactions.clear()
+
+    logger.info(f"Parsing CSV file stream for: {filename}")
     raw_data = file_stream.read()
     try:
         content_decoded = raw_data.decode('utf-8')
         logger.debug("Decoded as UTF-8.")
     except UnicodeDecodeError as e:
-        logger.warning(f"Failed UTF-8 decoding ({e}). Fallback to latin-1.")
+        logger.warning(f"Failed UTF-8 decode ({e}). Fallback to latin-1.")
         content_decoded = raw_data.decode('latin-1', errors='replace')
 
     reader = csv.reader(io.StringIO(content_decoded), delimiter=';')
@@ -155,6 +157,7 @@ def parse_csv_and_store(file_stream, filename=""):
         for h_i, header in enumerate(headers):
             row_data[header] = row[h_i] if h_i < len(row) else ''
 
+        # Attempt float conversion on 'Betrag'
         if 'Betrag' in row_data:
             val = row_data['Betrag'].replace('\t','').replace(',','.')
             try:
@@ -166,7 +169,9 @@ def parse_csv_and_store(file_stream, filename=""):
         transactions.append(row_data)
         row_count += 1
 
-    logger.debug(f"Finished parsing {filename}. Stored {row_count} rows.")
+    logger.info(f"Finished parsing {filename}. Stored {row_count} rows. "
+                f"Current total in memory: {len(transactions)}")
+
 
 def get_category_by_id(cat_id):
     for c in categories:
@@ -187,8 +192,7 @@ def get_list_by_id(l_id):
     return None
 
 def is_expense(trx):
-    amt = trx.get('Betrag', 0.0)
-    return (amt < 0)
+    return (trx.get('Betrag', 0.0) < 0)
 
 def compute_refund_status(trx_index):
     for lst in lists_data:
@@ -222,15 +226,20 @@ def get_trx_amounts_for_category(cat_id):
                 refundable_sum += amt
 
     after_refund = total_overall - refundable_sum
-    return (total_overall, refundable_sum, after_refund,
-            total_excluding_lists, total_list_items)
+    return (
+        total_overall,
+        refundable_sum,
+        after_refund,
+        total_excluding_lists,
+        total_list_items
+    )
 
 def compute_global_expenses():
     total = 0.0
     refundable = 0.0
     for idx, trx in enumerate(transactions):
         if is_expense(trx):
-            amt = trx.get('Betrag',0.0)
+            amt = trx.get('Betrag', 0.0)
             total += amt
             if compute_refund_status(idx):
                 refundable += amt
@@ -239,7 +248,7 @@ def compute_global_expenses():
 def compute_global_income():
     total_inc = 0.0
     for trx in transactions:
-        if trx.get('Betrag',0.0) >= 0:
+        if trx.get('Betrag', 0.0) >= 0:
             total_inc += trx['Betrag']
     return total_inc
 
@@ -247,8 +256,7 @@ def list_files_in_uploads(extension=".csv"):
     if not os.path.exists(UPLOAD_FOLDER):
         return []
     all_files = os.listdir(UPLOAD_FOLDER)
-    filtered = [f for f in all_files if f.lower().endswith(extension)]
-    return sorted(filtered)
+    return sorted([f for f in all_files if f.lower().endswith(extension)])
 
 def build_transactions_data():
     results = []
@@ -270,31 +278,24 @@ def build_transactions_data():
     return results
 
 
-@app.route('/charts/<filename>')
-def serve_chart_file(filename):
-    """
-    Serve a pre-rendered PNG from the /charts/ folder.
-    E.g. GET /charts/bar_chart.png or /charts/group_chart.png
-    """
-    return send_from_directory(CHARTS_FOLDER, filename)
+##################################################
+#         Single Pre-Render Function             #
+##################################################
 
-
-# ------------------- New: Protect all routes with @before_request ---------------
-@app.before_first_request
 def pre_render_charts():
     """
-    This will run once (the first time the server receives any request).
-    We'll generate bar_chart.png and group_chart.png and store them in /charts/ folder.
+    Generate a couple of PNG charts (bar_chart.png, group_chart.png)
+    and store them in CHARTS_FOLDER. Called once in production.
     """
+    logger.info("Pre-rendering bar_chart.png and group_chart.png...")
 
-    # 1) Generate the 'bar_chart.png'
+    # 1) bar_chart.png
     fig, ax = plt.subplots(figsize=(6,4))
 
     cat_sums = {}
     cat_sums[None] = 0.0
     for c in categories:
         cat_sums[c['id']] = 0.0
-
     for trx in transactions:
         if is_expense(trx):
             cid = trx.get('DetectedCategoryId')
@@ -314,7 +315,7 @@ def pre_render_charts():
         sums.append(cat_sums[None])
         colors.append("#dddddd")
 
-    if len(cat_names) == 0:
+    if not cat_names:
         cat_names = ["No data"]
         sums = [0]
         colors = ["#999999"]
@@ -325,7 +326,6 @@ def pre_render_charts():
     ax.set_ylabel("Amount")
     plt.xticks(rotation=45, ha='right')
 
-    # Label each bar
     for rect, val in zip(bars, sums):
         height = rect.get_height()
         if val >= 0:
@@ -344,24 +344,20 @@ def pre_render_charts():
     plt.savefig(bar_chart_path, format='png')
     plt.close(fig)
 
-    # 2) Generate the 'group_chart.png'
+    # 2) group_chart.png
     fig2, ax2 = plt.subplots(figsize=(6,4))
 
-    # (similar code from your group_bar_chart_png logic)
     cat_sums = {}
     for c in categories:
         cat_sums[c['id']] = 0.0
-
     for trx in transactions:
         if is_expense(trx):
             cid = trx.get('DetectedCategoryId')
-            cat_sums.setdefault(cid, 0.0)
             cat_sums[cid] += trx['Betrag']
 
     group_sums = {}
     for g in groups:
         group_sums[g['id']] = 0.0
-
     for c in categories:
         g_id = c.get('group_id')
         group_sums.setdefault(g_id, 0.0)
@@ -385,7 +381,7 @@ def pre_render_charts():
         group_vals.append(val)
         color_list.append(col)
 
-    if len(group_names) == 0:
+    if not group_names:
         group_names = ["No data"]
         group_vals = [0]
         color_list = ["#999999"]
@@ -414,45 +410,54 @@ def pre_render_charts():
     plt.savefig(group_chart_path, format='png')
     plt.close(fig2)
 
-    logger.info("Pre-rendered bar_chart.png and group_chart.png in /charts/ folder.")
-    
+    logger.info("Finished generating bar_chart.png & group_chart.png")
+
+
+@app.route('/charts/<filename>')
+def serve_chart_file(filename):
+    """
+    Serve a pre-rendered PNG from the /charts/ folder.
+    """
+    return send_from_directory(CHARTS_FOLDER, filename)
+
+
+##############################################
+#   Minimal @before_request for Auth Check   #
+##############################################
+
 @app.before_request
 def require_login():
-    # Let static files, login, verify, bar_chart_png, group_bar_chart_png pass:
-    if request.endpoint in (
-        "login", 
-        "verify", 
-        "static", 
-        "bar_chart_png",     # <<-- ALLOW
-        "group_bar_chart_png"  # <<-- ALLOW
-    ):
+    """
+    Protect all routes except login / verify / static / bar_chart_png / group_bar_chart_png
+    from anonymous access.
+    """
+    if request.endpoint in ("login", "verify", "static",
+                           "bar_chart_png", "group_bar_chart_png"):
         return
-    # If not logged in => redirect to /login
     if not session.get("phone_verified"):
         return redirect(url_for("login"))
 
 
-# ------------------- Routes for phone-based login ---------------
+########################################
+#   Login / Verification routes
+########################################
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         phone = request.form.get("phone", "").strip()
         if phone in ALLOWED_PHONE_NUMBERS:
-            # Generate a random 6-digit code
             code = f"{random.randint(100000,999999)}"
-            # Store it in phone_code_map
             phone_code_map[phone] = {
                 "code": code,
                 "timestamp": datetime.now()
             }
-            # Send SMS via Twilio
             try:
                 twilio_client.messages.create(
                     body=f"Your verification code is {code}",
                     from_=TWILIO_PHONE,
                     to=phone
                 )
-                # Store the phone in session temporarily
                 session["pending_phone"] = phone
                 flash("Verification code sent via SMS!", "success")
                 return redirect(url_for("verify"))
@@ -462,7 +467,7 @@ def login():
         else:
             flash("Phone number not allowed.", "danger")
             return redirect(url_for("login"))
-    return render_template("login.html")  # a simple form that asks for phone
+    return render_template("login.html")
 
 @app.route("/verify", methods=["GET", "POST"])
 def verify():
@@ -473,16 +478,13 @@ def verify():
             flash("No phone in session. Please re-login.", "danger")
             return redirect(url_for("login"))
 
-        # Check code
         entry = phone_code_map.get(phone, {})
         if not entry:
             flash("No code entry found. Please re-login.", "danger")
             return redirect(url_for("login"))
 
         if user_code == entry["code"]:
-            # Mark user as verified
             session["phone_verified"] = phone
-            # Clear pending from session
             session.pop("pending_phone", None)
             flash("Phone verified! Welcome!", "success")
             return redirect(url_for("index"))
@@ -490,15 +492,18 @@ def verify():
             flash("Invalid code. Please try again.", "danger")
             return redirect(url_for("verify"))
 
-    return render_template("verify.html")  # a simple form that asks for code
+    return render_template("verify.html")
 
 
-# ------------------- Routes --------------------
+########################################
+#        Main Routes
+########################################
 
 @app.route('/')
 def index():
     logger.debug("Serving home page.")
     return render_template('index.html')
+
 
 @app.route('/transactions')
 def view_transactions():
@@ -514,7 +519,6 @@ def view_transactions():
         cat_color = cat['color'] if cat else "#dddddd"
         data.append((trx, cat_name, cat_color, idx))
 
-    # Sorting
     if sort_mode == 'lowest':
         data.sort(key=lambda x: x[0].get('Betrag',0.0))
     elif sort_mode == 'highest':
@@ -550,6 +554,7 @@ def view_transactions():
         active_json_file=active_json_file
     )
 
+
 @app.route('/transactions/upload_csv', methods=['POST'])
 def upload_csv_files():
     files = request.files.getlist('csv_files[]')
@@ -576,6 +581,7 @@ def upload_csv_files():
         file.seek(0)
         file.save(save_path)
 
+        # If the user requested immediate parse, parse into memory.
         if parse_on_upload:
             file.stream.seek(0)
             parse_csv_and_store(file.stream, filename)
@@ -585,6 +591,7 @@ def upload_csv_files():
             flash(f"CSV file '{filename}' uploaded (not parsed).", "success")
 
     return redirect(url_for('view_transactions'))
+
 
 @app.route('/ajax/csv/parse', methods=['POST'])
 def ajax_parse_csv():
@@ -611,6 +618,7 @@ def ajax_parse_csv():
         "transactions": updated_tx_data
     })
 
+
 @app.route('/ajax/csv/delete', methods=['POST'])
 def ajax_delete_csv():
     data = request.get_json()
@@ -630,12 +638,14 @@ def ajax_delete_csv():
     else:
         return jsonify({"status":"error","message":"File not found on disk"}),404
 
+
 @app.route('/transactions/assign/<int:trx_index>/<int:cat_id>', methods=['POST'])
 def assign_category(trx_index, cat_id):
     if 0 <= trx_index < len(transactions):
         transactions[trx_index]['DetectedCategoryId'] = cat_id
     flash("Transaction category updated.", 'success')
     return redirect(url_for('view_transactions'))
+
 
 # --------------------- JSON Categories Handling ----------------------
 
@@ -663,6 +673,7 @@ def upload_categories_json():
 
     flash(f"JSON file '{filename}' uploaded. You can select it in the .json list overlay.", "success")
     return redirect(url_for('view_transactions'))
+
 
 @app.route('/categories/select_json', methods=['POST'])
 def select_categories_json():
@@ -729,6 +740,7 @@ def select_categories_json():
         else:
             next_list_id = 1
 
+        # Ensure no transaction is assigned to a category that doesn't exist
         for trx in transactions:
             cid = trx.get('DetectedCategoryId')
             if not any(c['id'] == cid for c in categories):
@@ -742,6 +754,7 @@ def select_categories_json():
         flash(f"Error selecting JSON: {e}", "danger")
 
     return redirect(url_for('view_transactions'))
+
 
 @app.route('/categories/deselect_json', methods=['POST'])
 def deselect_categories_json():
@@ -763,6 +776,7 @@ def deselect_categories_json():
     flash("JSON file has been deselected. All categories, groups, and lists cleared.", "success")
     return redirect(url_for('view_transactions'))
 
+
 # --------------------- Categories CRUD & Export/Import ----------------------
 
 @app.route('/categories')
@@ -771,8 +785,7 @@ def manage_categories():
     for c in categories:
         cat_stats_map[c['id']] = [0.0, 0]
 
-    # We'll also compute total_exp so categories.html can show the percentage
-    total_exp, ref_exp, after_exp = compute_global_expenses()  # <--- new
+    total_exp, ref_exp, after_exp = compute_global_expenses()
 
     for idx, trx in enumerate(transactions):
         if is_expense(trx):
@@ -811,7 +824,7 @@ def manage_categories():
         groups=groups,
         lists_data=lists_data,
         transactions=transactions,
-        total_exp=total_exp   # <-- pass total_exp so we can compute % in categories.html
+        total_exp=total_exp
     )
 
 
@@ -842,6 +855,7 @@ def create_category():
         "cat_sum": cat['_sum'],
         "cat_count": cat['_count']
     })
+
 
 @app.route('/categories/view/<int:cat_id>')
 def view_category_transactions(cat_id):
@@ -896,6 +910,7 @@ def view_category_transactions(cat_id):
         lists_data=lists_data
     )
 
+
 @app.route('/ajax/category/rename', methods=['POST'])
 def ajax_rename_category():
     cat_id = int(request.form.get('cat_id','0'))
@@ -906,6 +921,7 @@ def ajax_rename_category():
         return jsonify({"status":"ok","message":f"Renamed category {cat_id} to '{new_name}'"})
     return jsonify({"status":"error","message":"Category not found"})
 
+
 @app.route('/ajax/category/toggle_show_group', methods=['POST'])
 def ajax_toggle_show_group():
     cat_id = int(request.form.get('cat_id','0'))
@@ -914,6 +930,7 @@ def ajax_toggle_show_group():
         cat['show_up_as_group'] = not cat['show_up_as_group']
         return jsonify({"status":"ok","message":f"Category '{cat['name']}' => show_as_group={cat['show_up_as_group']}"} )
     return jsonify({"status":"error","message":"Category not found"})
+
 
 @app.route('/ajax/category/update_color', methods=['POST'])
 def ajax_update_category_color():
@@ -924,6 +941,7 @@ def ajax_update_category_color():
         cat['color'] = new_color
         return jsonify({"status":"ok","message":f"Updated color of category {cat_id} => {new_color}"})
     return jsonify({"status":"error","message":"Category not found"})
+
 
 @app.route('/ajax/category/assign_group', methods=['POST'])
 def ajax_assign_group():
@@ -945,6 +963,7 @@ def ajax_assign_group():
         else:
             return jsonify({"status":"error","message":"Group not found"})
 
+
 @app.route('/ajax/category/add_rule', methods=['POST'])
 def ajax_add_rule():
     cat_id = int(request.form.get('cat_id','0'))
@@ -961,6 +980,7 @@ def ajax_add_rule():
         "status":"error",
         "message":"Category not found or invalid rule"
     })
+
 
 @app.route('/ajax/category/remove_rule', methods=['POST'])
 def ajax_remove_rule():
@@ -982,6 +1002,7 @@ def ajax_remove_rule():
             })
     return jsonify({"status":"error","message":"Category not found"})
 
+
 @app.route('/ajax/category/delete', methods=['POST'])
 def ajax_delete_category():
     cat_id = int(request.form.get('cat_id','0'))
@@ -991,6 +1012,7 @@ def ajax_delete_category():
         if trx.get('DetectedCategoryId') == cat_id:
             trx['DetectedCategoryId'] = None
     return jsonify({"status":"ok","message":f"Category {cat_id} deleted"})
+
 
 # ---------------- GROUPS ----------------
 
@@ -1009,6 +1031,7 @@ def create_group():
     flash(f"Group '{name}' created.", "success")
     return redirect(url_for('manage_categories'))
 
+
 @app.route('/ajax/group/rename', methods=['POST'])
 def ajax_rename_group():
     group_id = int(request.form.get('group_id','0'))
@@ -1018,6 +1041,7 @@ def ajax_rename_group():
         grp['name'] = new_name
         return jsonify({"status":"ok","message":f"Renamed group {group_id} => '{new_name}'"})
     return jsonify({"status":"error","message":"Group not found"})
+
 
 @app.route('/ajax/group/update_color', methods=['POST'])
 def ajax_update_group_color():
@@ -1029,6 +1053,7 @@ def ajax_update_group_color():
         return jsonify({"status":"ok","message":f"Updated group {group_id} color => {new_color}"})
     return jsonify({"status":"error","message":"Group not found"})
 
+
 @app.route('/ajax/group/delete', methods=['POST'])
 def ajax_delete_group():
     group_id = int(request.form.get('group_id','0'))
@@ -1039,6 +1064,7 @@ def ajax_delete_group():
             c['group_id'] = None
     return jsonify({"status":"ok","message":f"Group {group_id} deleted"})
 
+
 @app.route('/groups/delete/<int:group_id>', methods=['POST'])
 def delete_group(group_id):
     global groups
@@ -1048,6 +1074,7 @@ def delete_group(group_id):
             c['group_id'] = None
     flash("Group deleted.", "success")
     return redirect(url_for('manage_categories'))
+
 
 @app.route('/groups/view/<int:group_id>')
 def view_group_transactions(group_id):
@@ -1063,6 +1090,7 @@ def view_group_transactions(group_id):
             cat_name = cat_obj['name'] if cat_obj else "Unknown"
             results.append((idx, trx, cat_name))
     return render_template('group_transactions.html', group=g, results=results)
+
 
 # ---------------- LISTS -----------------
 
@@ -1091,6 +1119,7 @@ def create_list():
     flash(f"List '{name}' created.", "success")
     return redirect(url_for('manage_categories'))
 
+
 @app.route('/lists/add_transaction', methods=['POST'])
 def add_trx_to_list():
     list_id = int(request.form.get('list_id','0'))
@@ -1111,6 +1140,7 @@ def add_trx_to_list():
 
     return redirect(url_for('manage_categories'))
 
+
 @app.route('/lists/remove_transaction', methods=['POST'])
 def remove_trx_from_list():
     list_id = int(request.form.get('list_id','0'))
@@ -1128,6 +1158,7 @@ def remove_trx_from_list():
 
     return redirect(url_for('manage_categories'))
 
+
 @app.route('/lists/rename/<int:list_id>', methods=['POST'])
 def rename_list(list_id):
     new_name = request.form.get('new_name','').strip()
@@ -1137,6 +1168,7 @@ def rename_list(list_id):
         flash(f"List renamed to '{new_name}'", "success")
     return "OK"
 
+
 @app.route('/lists/toggle_refund/<int:list_id>', methods=['POST'])
 def toggle_refund_list(list_id):
     lobj = get_list_by_id(list_id)
@@ -1145,12 +1177,14 @@ def toggle_refund_list(list_id):
         flash(f"List '{lobj['name']}' refund toggled -> {lobj['refund_list']}", "success")
     return "OK"
 
+
 @app.route('/lists/delete/<int:list_id>', methods=['POST'])
 def delete_list(list_id):
     global lists_data
     lists_data = [l for l in lists_data if l['id'] != list_id]
     flash("List deleted", "success")
     return "OK"
+
 
 @app.route('/lists/view/<int:list_id>')
 def view_list_transactions(list_id):
@@ -1172,6 +1206,7 @@ def view_list_transactions(list_id):
                            the_list=lobj,
                            items=items,
                            total=total_amt)
+
 
 # ------------------ Import / Export (Existing) ------------------
 
@@ -1204,6 +1239,7 @@ def export_categories():
     resp.headers['Content-Type'] = 'application/json'
     resp.headers['Content-Disposition'] = 'attachment; filename=categories.json'
     return resp
+
 
 @app.route('/categories/import', methods=['POST'])
 def import_categories():
@@ -1277,7 +1313,9 @@ def import_categories():
 
     return redirect(url_for('manage_categories'))
 
+
 # ------------------ STATS ------------------
+
 @app.route('/stats')
 def stats():
     sort_mode = request.args.get('sort','lowest')
@@ -1310,7 +1348,7 @@ def stats():
         ct = cat_counts[cid]
         pct = 0.0
         if total_exp < 0.0:  # total_exp is negative
-            pct = (amt / total_exp) * 100.0  # negative / negative => positive %
+            pct = (amt / total_exp) * 100.0
         data_list.append({
             "cat_id": cid,
             "name": c['name'],
@@ -1334,7 +1372,6 @@ def stats():
             "pct": pct_unassigned
         })
 
-    # Sorting
     if sort_mode == 'highest':
         data_list.sort(key=lambda x: x['amount'], reverse=True)
     elif sort_mode == 'lowest':
@@ -1403,6 +1440,7 @@ def stats():
                            total_inc=total_inc,
                            lists_data=lists_data)
 
+
 @app.route('/stats/export_interactive')
 def export_interactive_charts():
     cat_sums = {}
@@ -1427,8 +1465,12 @@ def export_interactive_charts():
     resp.headers['Content-Type'] = 'text/html'
     return resp
 
+
 @app.route('/stats/bar_chart.png')
 def bar_chart_png():
+    """
+    Generate and return a bar chart *on-demand* in a temp file.
+    """
     cat_sums = {}
     cat_sums[None] = 0.0
     for c in categories:
@@ -1467,7 +1509,6 @@ def bar_chart_png():
     ax.set_ylabel("Amount")
     plt.xticks(rotation=45, ha='right')
 
-    # Label each bar with its value
     for rect, val in zip(bars, sums):
         height = rect.get_height()
         if val >= 0:
@@ -1483,19 +1524,19 @@ def bar_chart_png():
 
     plt.tight_layout()
 
-    # Instead of returning the in-memory stream directly,
-    # write it to a temp file:
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         plt.savefig(tmp.name, format='png')
         tmp_path = tmp.name
     plt.close(fig)
 
-    # Now serve that file via send_file:
     return send_file(tmp_path, mimetype='image/png')
 
-# ...
+
 @app.route('/stats/group_bar_chart.png')
 def group_bar_chart_png():
+    """
+    Similar on-demand group chart in a temp file.
+    """
     cat_sums = {}
     for c in categories:
         cat_sums[c['id']] = 0.0
@@ -1512,7 +1553,7 @@ def group_bar_chart_png():
 
     for c in categories:
         g_id = c.get('group_id')
-        group_sums.setdefault(g_id,0.0)
+        group_sums.setdefault(g_id, 0.0)
         group_sums[g_id] += cat_sums[c['id']]
 
     show_as_group = []
@@ -1562,13 +1603,13 @@ def group_bar_chart_png():
 
     plt.tight_layout()
 
-    # Save to temp file:
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         plt.savefig(tmp.name, format='png')
         tmp_path = tmp.name
     plt.close(fig)
 
     return send_file(tmp_path, mimetype='image/png')
+
 
 @app.route('/stats/download_bar_chart')
 def download_bar_chart():
@@ -1619,6 +1660,7 @@ def download_bar_chart():
         as_attachment=True,
         download_name='category_chart.png'
     )
+
 
 @app.route('/stats/download_group_chart')
 def download_group_chart():
@@ -1684,6 +1726,7 @@ def download_group_chart():
         download_name='group_chart.png'
     )
 
+
 @app.route('/categories/view/unassigned')
 def view_unassigned_transactions():
     data = []
@@ -1712,6 +1755,7 @@ def view_unassigned_transactions():
         refundable=refundable,
         after_refund=after_refund
     )
+
 
 ##################################
 # AJAX endpoints for adding/removing from a list
@@ -1750,6 +1794,7 @@ def ajax_add_trx_to_list():
             "added":False
         })
 
+
 @app.route('/ajax/unassign_category', methods=['POST'])
 def ajax_unassign_category():
     data = request.get_json()
@@ -1768,6 +1813,7 @@ def ajax_unassign_category():
         "status":"ok",
         "message":f"Transaction {trx_index} unassigned from any category"
     }), 200
+
 
 @app.route('/ajax/assign_category', methods=['POST'])
 def ajax_assign_category():
@@ -1790,6 +1836,7 @@ def ajax_assign_category():
         'status': 'ok',
         'message': f"Transaction {trx_index} assigned to category '{cat['name']}'"
     }), 200
+
 
 @app.route('/ajax/remove_trx_from_list', methods=['POST'])
 def ajax_remove_trx_from_list():
@@ -1823,6 +1870,7 @@ def ajax_remove_trx_from_list():
             "message":f"Transaction {trx_index} not in list '{lobj['name']}'",
             "removed":False
         })
+
 
 @app.route('/ajax/search_transactions', methods=['GET'])
 def ajax_search_transactions():
@@ -1869,6 +1917,15 @@ def ajax_search_transactions():
 
     return jsonify({"status":"ok","transactions": filtered_data})
 
+
+##################################################
+#  Main entry point: run the Flask app
+##################################################
 if __name__ == '__main__':
-    logger.debug("Starting Flask app (debug=True) on port 4444.")
-    app.run(debug=True, port=4444)
+    # Only pre-render once in production mode (debug=False).
+    if not app.debug:
+        pre_render_charts()
+
+    logger.debug("Starting Flask app on port 4444 (debug=False).")
+    # DO NOT USE debug=True in production, that can cause repeated reloads.
+    app.run(debug=False, port=4444)
